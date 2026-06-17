@@ -16,7 +16,7 @@ final class AntigravityProvider: UsageProvider {
     // MARK: - Auth
 
     func checkAuth() async -> AuthState {
-        if !Self.discoverServers().isEmpty { return .signedIn }
+        if !(await Self.discoverServersAsync()).isEmpty { return .signedIn }
         let signedIn = await dataStore.hasCookie(domain: "google.com") {
             ["SID", "__Secure-1PSID", "SAPISID"].contains($0.name)
         }
@@ -31,7 +31,7 @@ final class AntigravityProvider: UsageProvider {
             startURL: URL(string: "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fantigravity.google%2F")!,
             dataStore: dataStore,
             loginCheck: { _, _ in
-                if !Self.discoverServers().isEmpty { return true }
+                if !(await Self.discoverServersAsync()).isEmpty { return true }
                 return await store.hasCookie(domain: "google.com") {
                     ["SID", "__Secure-1PSID", "SAPISID"].contains($0.name)
                 }
@@ -48,8 +48,8 @@ final class AntigravityProvider: UsageProvider {
     // MARK: - Fetch
 
     func fetchUsage() async -> FetchResult {
-        for server in Self.discoverServers() {
-            for port in Self.listeningPorts(forPID: server.pid) {
+        for server in await Self.discoverServersAsync() {
+            for port in await Self.listeningPortsAsync(forPID: server.pid) {
                 guard let payload = await Self.fetchUserStatus(port: port, csrfToken: server.csrfToken),
                       let usage = Self.parseUserStatus(payload) else {
                     continue
@@ -68,7 +68,19 @@ final class AntigravityProvider: UsageProvider {
         let score: Int
     }
 
-    private static func discoverServers() -> [ServerCandidate] {
+    private static func discoverServersAsync() async -> [ServerCandidate] {
+        await Task.detached(priority: .utility) {
+            discoverServers()
+        }.value
+    }
+
+    private static func listeningPortsAsync(forPID pid: Int) async -> [Int] {
+        await Task.detached(priority: .utility) {
+            listeningPorts(forPID: pid)
+        }.value
+    }
+
+    nonisolated private static func discoverServers() -> [ServerCandidate] {
         let output = runCommand("/bin/ps", ["ax", "-o", "pid=,ppid=,command="])
         let lines = output.split(separator: "\n").map(String.init)
         let currentWorkspaceHint = "project_claude_usage_counter"
@@ -93,7 +105,7 @@ final class AntigravityProvider: UsageProvider {
         .sorted { $0.score > $1.score }
     }
 
-    private static func listeningPorts(forPID pid: Int) -> [Int] {
+    nonisolated private static func listeningPorts(forPID pid: Int) -> [Int] {
         let output = runCommand("/usr/sbin/lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", "\(pid)"])
         return output
             .split(separator: "\n")
@@ -105,7 +117,7 @@ final class AntigravityProvider: UsageProvider {
             }
     }
 
-    private static func runCommand(_ launchPath: String, _ arguments: [String]) -> String {
+    nonisolated private static func runCommand(_ launchPath: String, _ arguments: [String]) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: launchPath)
         process.arguments = arguments
@@ -116,6 +128,11 @@ final class AntigravityProvider: UsageProvider {
 
         do {
             try process.run()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return String(data: data, encoding: .utf8) ?? ""
@@ -124,7 +141,7 @@ final class AntigravityProvider: UsageProvider {
         }
     }
 
-    private static func firstMatch(in text: String, pattern: String) -> String? {
+    nonisolated private static func firstMatch(in text: String, pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let ns = text as NSString
         let range = NSRange(location: 0, length: ns.length)
