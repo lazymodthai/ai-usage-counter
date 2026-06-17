@@ -4,7 +4,7 @@ import WebKit
 // MARK: - Provider identity
 
 enum ProviderID: String, CaseIterable, Codable, Identifiable {
-    case claude, codex, gemini
+    case claude, codex, gemini, antigravity
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable {
         case .claude: return "Claude"
         case .codex:  return "Codex"
         case .gemini: return "Gemini"
+        case .antigravity: return "Antigravity"
         }
     }
 
@@ -21,6 +22,7 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable {
         case .claude: return "bolt.fill"
         case .codex:  return "chevron.left.forwardslash.chevron.right"
         case .gemini: return "sparkle"
+        case .antigravity: return "a.circle.fill"
         }
     }
 }
@@ -35,6 +37,7 @@ struct ProviderUsage: Sendable, Codable {
     var sessionResetAt: Date?
     var weeklyResetAt: Date?
     var planName: String?
+    var quotaLanes: [ProviderQuotaLane]?
     var fetchedAt: Date = Date()
 
     var isStale: Bool { Date().timeIntervalSince(fetchedAt) > 600 }
@@ -49,6 +52,15 @@ struct ProviderUsage: Sendable, Codable {
         if weeklyAtLimit, let r = weeklyResetAt, r > Date() { candidates.append(r) }
         return candidates.min()
     }
+}
+
+struct ProviderQuotaLane: Sendable, Codable, Identifiable {
+    var id: String
+    var label: String
+    var group: String?
+    var pct: Double
+    var resetAt: Date?
+    var resetText: String?
 }
 
 enum AuthState: String, Codable {
@@ -83,7 +95,8 @@ protocol UsageProvider: AnyObject {
 enum ProviderDataStores {
     static func store(for id: ProviderID) -> WKWebsiteDataStore {
         if id == .claude { return .default() }
-        let key = "providerStoreUUID.\(id.rawValue)"
+        let storeID: ProviderID = id == .antigravity ? .gemini : id
+        let key = "providerStoreUUID.\(storeID.rawValue)"
         let ud = UserDefaults.standard
         let uuid: UUID
         if let s = ud.string(forKey: key), let u = UUID(uuidString: s) {
@@ -172,11 +185,15 @@ enum ResetTimeParser {
     static func parseSessionReset(_ text: String, relativeTo: Date) -> Date? {
         var total: TimeInterval = 0
 
+        let dRegex  = try? NSRegularExpression(pattern: #"(\d+)\s*d"#, options: .caseInsensitive)
         let hRegex  = try? NSRegularExpression(pattern: #"(\d+)\s*h"#, options: .caseInsensitive)
         let mRegex  = try? NSRegularExpression(pattern: #"(\d+)\s*m"#, options: .caseInsensitive)
         let ns = text as NSString
         let range = NSRange(location: 0, length: ns.length)
 
+        if let m = dRegex?.firstMatch(in: text, range: range), m.numberOfRanges >= 2 {
+            if let v = Int(ns.substring(with: m.range(at: 1))) { total += TimeInterval(v * 86_400) }
+        }
         if let m = hRegex?.firstMatch(in: text, range: range), m.numberOfRanges >= 2 {
             if let v = Int(ns.substring(with: m.range(at: 1))) { total += TimeInterval(v * 3600) }
         }

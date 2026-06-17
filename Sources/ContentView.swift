@@ -17,6 +17,7 @@ extension Color {
         case .claude: return .accent
         case .codex:  return .haikuGreen
         case .gemini: return .opusBlue
+        case .antigravity: return Color(red: 0.70, green: 0.48, blue: 1.0)
         }
     }
 }
@@ -89,6 +90,9 @@ struct ProviderSection: View {
     private var isConnected: Bool { authState == .signedIn }
     private var hasBars: Bool { isConnected || providerID == .claude }
     private var isOnMenubar: Bool { store.menubarSource == providerID }
+    private var quotaBars: [(lane: ProviderQuotaLane, vm: UsageBarVM)] {
+        store.quotaBars(for: providerID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -100,7 +104,7 @@ struct ProviderSection: View {
                 Text(providerID.displayName)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
-                if providerID == .gemini && isConnected {
+                if (providerID == .gemini || providerID == .antigravity) && isConnected {
                     Text("beta")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.4))
@@ -152,6 +156,18 @@ struct ProviderSection: View {
                         label: "Weekly", icon: "calendar",
                         iconColor: .sonnetCyan, vm: vm)
                 }
+                ForEach(quotaBars, id: \.lane.id) { item in
+                    UsageBarRow(
+                        label: item.lane.label,
+                        icon: "gauge.with.dots.needle.bottom.50percent",
+                        iconColor: Color.tint(for: providerID),
+                        vm: item.vm)
+                }
+                if providerID != .claude
+                    && store.usages[providerID] == nil
+                    && authState == .signedIn {
+                    ProviderFetchStatusRow(providerID: providerID)
+                }
             } else if authState == .signedOut {
                 Text("Not connected")
                     .font(.system(size: 10))
@@ -160,6 +176,35 @@ struct ProviderSection: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+}
+
+struct ProviderFetchStatusRow: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    private var isFetching: Bool { store.fetchingProviders.contains(providerID) }
+    private var failureCount: Int { store.fetchFailures[providerID] ?? 0 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isFetching {
+                ProgressView().scaleEffect(0.55).tint(Color.white.opacity(0.5))
+            } else if failureCount > 0 {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.yellow.opacity(0.75))
+            }
+            Text(statusText)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.white.opacity(0.35))
+        }
+    }
+
+    private var statusText: String {
+        if isFetching { return "Fetching usage..." }
+        if failureCount > 0 { return "Usage not found. Retrying..." }
+        return "Waiting to fetch usage..."
     }
 }
 

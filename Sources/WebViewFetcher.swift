@@ -33,7 +33,7 @@ final class WebViewFetcher: NSObject, WKNavigationDelegate {
         if webView == nil {
             createWebView()
             needsLoad = true
-        } else if currentURL?.host != pageURL.host
+        } else if currentURL?.absoluteString != pageURL.absoluteString
                     || loadFailed
                     || (lastLoadAt.map { Date().timeIntervalSince($0) > reloadIfOlderThan } ?? true) {
             needsLoad = true
