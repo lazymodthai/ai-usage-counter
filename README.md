@@ -62,7 +62,7 @@ Claude, Codex และ Gemini แสดงโมเดล limit หลักแ
 
 ## ติดตั้ง
 
-1. ดาวน์โหลด DMG จากหน้า [Releases](https://github.com/lazymodthai/claude-usage-counter/releases)
+1. ดาวน์โหลด DMG จากหน้า [Releases](https://github.com/lazymodthai/ai-usage-counter/releases)
 2. ลากแอปลงโฟลเดอร์ **Applications** → เปิดจาก Launchpad
 3. มองหาไอคอน ⚡ บนแถบเมนู
 
