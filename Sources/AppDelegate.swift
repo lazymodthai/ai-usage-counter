@@ -74,7 +74,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openPopover() {
         guard let button = statusItem.button else { return }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        alignPopoverWindow(to: button)
+        DispatchQueue.main.async { [weak self, weak button] in
+            guard let self, let button else { return }
+            self.alignPopoverWindow(to: button)
+        }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func alignPopoverWindow(to button: NSStatusBarButton) {
+        guard
+            let buttonWindow = button.window,
+            let popoverWindow = popover.contentViewController?.view.window
+        else { return }
+
+        let buttonRectInWindow = button.convert(button.bounds, to: nil)
+        let buttonRectOnScreen = buttonWindow.convertToScreen(buttonRectInWindow)
+        let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let popoverFrame = popoverWindow.frame
+
+        let centeredX = buttonRectOnScreen.midX - (popoverFrame.width / 2)
+        let clampedX = min(
+            max(centeredX, screenFrame.minX + 8),
+            screenFrame.maxX - popoverFrame.width - 8
+        )
+        let y = buttonRectOnScreen.minY - popoverFrame.height - 4
+
+        popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: y))
     }
 
     private func closePopover() {
