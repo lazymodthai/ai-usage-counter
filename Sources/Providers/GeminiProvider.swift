@@ -21,13 +21,17 @@ final class GeminiProvider: UsageProvider {
     }
 
     func presentLogin(onComplete: @escaping @MainActor () -> Void) {
+        let store = dataStore
         WebAuthController.show(WebAuthController.Config(
             providerID: .gemini,
             title: "Sign in to Gemini",
-            startURL: URL(string: "https://gemini.google.com/app")!,
+            startURL: URL(string: "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp")!,
             dataStore: dataStore,
             loginCheck: { _, url in
-                url.absoluteString.hasPrefix("https://gemini.google.com/app")
+                guard url.host?.contains("gemini.google.com") == true else { return false }
+                return await store.hasCookie(domain: "google.com") {
+                    ["SID", "__Secure-1PSID", "SAPISID"].contains($0.name)
+                }
             }
         ), onComplete: onComplete)
     }
