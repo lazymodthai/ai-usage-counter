@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var store: ProviderStore!
     private var eventMonitor: Any?
+    private var statusAnchorObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -41,6 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePopover()
         }
+        statusAnchorObserver = NotificationCenter.default.addObserver(
+            forName: .statusItemAnchorDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.alignOpenPopover()
+        }
 
         // Start watchers, auth checks, and the fetch scheduler
         store.start()
@@ -74,16 +82,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openPopover() {
         guard let button = statusItem.button else { return }
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        alignPopoverWindow(to: button)
-        DispatchQueue.main.async { [weak self, weak button] in
-            guard let self, let button else { return }
-            self.alignPopoverWindow(to: button)
+        alignOpenPopover()
+        DispatchQueue.main.async { [weak self] in
+            self?.alignOpenPopover()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.alignOpenPopover()
         }
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func alignPopoverWindow(to button: NSStatusBarButton) {
+    private func alignOpenPopover() {
         guard
+            popover.isShown,
+            let button = statusItem.button,
             let buttonWindow = button.window,
             let popoverWindow = popover.contentViewController?.view.window
         else { return }
@@ -93,14 +105,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
         let popoverFrame = popoverWindow.frame
 
-        let centeredX = buttonRectOnScreen.midX - (popoverFrame.width / 2)
-        let clampedX = min(
-            max(centeredX, screenFrame.minX + 8),
+        let preferredX = buttonRectOnScreen.midX - popoverFrame.width / 2
+        let x = min(
+            max(preferredX, screenFrame.minX + 8),
             screenFrame.maxX - popoverFrame.width - 8
         )
-        let y = buttonRectOnScreen.minY - popoverFrame.height - 4
+        let preferredY = buttonRectOnScreen.minY - popoverFrame.height - 4
+        let y = min(
+            max(preferredY, screenFrame.minY + 8),
+            screenFrame.maxY - popoverFrame.height - 8
+        )
 
-        popoverWindow.setFrameOrigin(NSPoint(x: clampedX, y: y))
+        popoverWindow.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     private func closePopover() {
@@ -111,5 +127,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        if let observer = statusAnchorObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
+}
+
+extension Notification.Name {
+    static let statusItemAnchorDidChange = Notification.Name("statusItemAnchorDidChange")
 }

@@ -26,21 +26,60 @@ extension Color {
 struct ContentView: View {
     @EnvironmentObject var store: ProviderStore
 
+    private var leftProviders: [ProviderID] {
+        store.visibleProviderIDs.filter { $0 != .antigravity }
+    }
+
+    private var visibleColumns: [[ProviderID]] {
+        let hasAntigravity = store.visibleProviders.contains(.antigravity)
+        if !leftProviders.isEmpty && hasAntigravity {
+            return [leftProviders, [.antigravity]]
+        }
+        if hasAntigravity { return [[.antigravity]] }
+        return [leftProviders]
+    }
+
+    private var usesTwoColumns: Bool { visibleColumns.count == 2 }
+    private var contentWidth: CGFloat { usesTwoColumns ? 640 : 320 }
+
     var body: some View {
         ZStack {
             Color.appBg.ignoresSafeArea()
             VStack(spacing: 0) {
                 HeaderRow()
                 Rectangle().fill(Color.divider).frame(height: 1)
-                ForEach(ProviderID.allCases) { id in
-                    ProviderSection(providerID: id)
-                    Rectangle().fill(Color.divider).frame(height: 1)
+                if usesTwoColumns {
+                    HStack(alignment: .top, spacing: 0) {
+                        ProviderColumn(providerIDs: visibleColumns[0])
+                            .frame(width: 319)
+                        Rectangle().fill(Color.divider).frame(width: 1)
+                        ProviderColumn(providerIDs: visibleColumns[1])
+                            .frame(width: 320)
+                    }
+                } else {
+                    ProviderColumn(providerIDs: visibleColumns.first ?? [])
                 }
+                Rectangle().fill(Color.divider).frame(height: 1)
                 FooterRow()
             }
         }
-        .frame(width: 320)
+        .frame(width: contentWidth)
         .onAppear { store.refreshAll() }
+    }
+}
+
+struct ProviderColumn: View {
+    let providerIDs: [ProviderID]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(providerIDs.enumerated()), id: \.element.id) { index, id in
+                ProviderSection(providerID: id)
+                if index < providerIDs.count - 1 {
+                    Rectangle().fill(Color.divider).frame(height: 1)
+                }
+            }
+        }
     }
 }
 
@@ -75,6 +114,13 @@ struct HeaderRow: View {
             .popover(isPresented: $store.showSettings) {
                 SettingsView().environmentObject(store)
             }
+            Button(action: { NSApp.terminate(nil) }) {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .help("Quit AI Usage Counter")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -386,6 +432,19 @@ struct SettingsView: View {
 
                         Rectangle().fill(Color.divider).frame(height: 1)
 
+                        // Visible agents
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Visible Agents", systemImage: "eye")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.5))
+
+                            ForEach(ProviderID.allCases) { id in
+                                VisibleProviderRow(providerID: id)
+                            }
+                        }
+
+                        Rectangle().fill(Color.divider).frame(height: 1)
+
                         // Menu bar source
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Menu Bar Shows", systemImage: "menubar.rectangle")
@@ -460,8 +519,9 @@ struct SettingsView: View {
     }
 
     private var menubarChoices: [ProviderID] {
-        var choices = store.connectedProviders
-        if choices.isEmpty { choices = [.claude] }
+        var choices = store.visibleConnectedProviders
+        if choices.isEmpty, store.isProviderVisible(.claude) { choices = [.claude] }
+        if choices.isEmpty { choices = store.visibleProviderIDs }
         if !choices.contains(store.menubarSource) { choices.append(store.menubarSource) }
         return choices
     }
@@ -535,6 +595,38 @@ struct ProviderAccountRow: View {
         case .expired:   return .yellow
         case .signedOut: return Color.white.opacity(0.35)
         }
+    }
+}
+
+struct VisibleProviderRow: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { store.isProviderVisible(providerID) },
+            set: { store.setProviderVisible(providerID, visible: $0) }
+        )) {
+            HStack(spacing: 7) {
+                Image(systemName: providerID.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.tint(for: providerID))
+                    .frame(width: 14)
+                Text(providerID.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white)
+                if providerID == .antigravity {
+                    Text("right column")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(store.visibleProviderIDs.count == 1 && store.isProviderVisible(providerID))
     }
 }
 

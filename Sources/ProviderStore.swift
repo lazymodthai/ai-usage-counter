@@ -10,6 +10,7 @@ final class ProviderStore: ObservableObject {
     @Published private(set) var fetchingProviders: Set<ProviderID> = []
     @Published var isLoading: Bool = false
     @Published var showSettings: Bool = false
+    @Published private(set) var visibleProviders: Set<ProviderID> = Set(ProviderID.allCases)
 
     /// Which provider drives the menu bar. Selectable among connected providers.
     @Published var menubarSource: ProviderID {
@@ -18,6 +19,7 @@ final class ProviderStore: ObservableObject {
             // The newly selected provider should be fresh
             if authStates[menubarSource] == .signedIn { nextFetchAt[menubarSource] = Date() }
             updateStatusBar(force: true)
+            NotificationCenter.default.post(name: .statusItemAnchorDidChange, object: nil)
         }
     }
 
@@ -44,9 +46,18 @@ final class ProviderStore: ObservableObject {
     private var sleepObservers: [NSObjectProtocol] = []
 
     private static let cachedUsagesKey = "cachedProviderUsages"
+    private static let visibleProvidersKey = "visibleProviders"
 
     var connectedProviders: [ProviderID] {
         ProviderID.allCases.filter { authStates[$0] == .signedIn }
+    }
+
+    var visibleProviderIDs: [ProviderID] {
+        ProviderID.allCases.filter { visibleProviders.contains($0) }
+    }
+
+    var visibleConnectedProviders: [ProviderID] {
+        visibleProviderIDs.filter { authStates[$0] == .signedIn }
     }
 
     init() {
@@ -66,6 +77,10 @@ final class ProviderStore: ObservableObject {
             ? max(30, ud.double(forKey: "refreshInterval")) : 60.0
 
         menubarSource = ud.string(forKey: "menubarSource").flatMap(ProviderID.init) ?? .claude
+        if let rawVisible = ud.stringArray(forKey: Self.visibleProvidersKey) {
+            let ids = rawVisible.compactMap(ProviderID.init(rawValue:))
+            if !ids.isEmpty { visibleProviders = Set(ids) }
+        }
 
         providers = [
             .claude: ClaudeProvider(),
@@ -111,6 +126,25 @@ final class ProviderStore: ObservableObject {
             authStates[id] = await p.checkAuth()
         }
         ensureValidMenubarSource()
+    }
+
+    func setProviderVisible(_ id: ProviderID, visible: Bool) {
+        var next = visibleProviders
+        if visible {
+            next.insert(id)
+        } else {
+            next.remove(id)
+        }
+        guard !next.isEmpty else { return }
+        visibleProviders = next
+        UserDefaults.standard.set(ProviderID.allCases.filter { next.contains($0) }.map(\.rawValue),
+                                  forKey: Self.visibleProvidersKey)
+        ensureValidMenubarSource()
+        updateStatusBar(force: true)
+    }
+
+    func isProviderVisible(_ id: ProviderID) -> Bool {
+        visibleProviders.contains(id)
     }
 
     private func scheduleInitialFetches() {
@@ -291,8 +325,11 @@ final class ProviderStore: ObservableObject {
     /// If the current menu bar provider is gone, fall back to the first connected
     /// one — or Claude, which still has the local JSONL estimate.
     private func ensureValidMenubarSource() {
-        guard authStates[menubarSource] != .signedIn else { return }
-        menubarSource = connectedProviders.first ?? .claude
+        guard visibleProviders.contains(menubarSource),
+              authStates[menubarSource] == .signedIn || menubarSource == .claude else {
+            menubarSource = visibleConnectedProviders.first ?? visibleProviderIDs.first ?? .claude
+            return
+        }
     }
 
     // MARK: - Claude local fallback
@@ -320,7 +357,12 @@ final class ProviderStore: ObservableObject {
 
     func updateStatusBar(force: Bool = false) {
         guard let button = statusItem?.button else { return }
-        let title = " \(sessionDisplay(for: menubarSource)) | \(weeklyDisplay(for: menubarSource))"
+        let title: String
+        if menubarSource == .antigravity {
+            title = " \(antigravityMenubarDisplay())"
+        } else {
+            title = " \(sessionDisplay(for: menubarSource)) | \(weeklyDisplay(for: menubarSource))"
+        }
         guard force || title != lastStatusTitle else { return }
         lastStatusTitle = title
 
@@ -329,7 +371,11 @@ final class ProviderStore: ObservableObject {
             button.image = img
         }
         button.title = title
-        button.toolTip = "\(menubarSource.displayName) usage — session | weekly"
+        if menubarSource == .antigravity {
+            button.toolTip = "Antigravity usage — Gemini | Claude+GPT"
+        } else {
+            button.toolTip = "\(menubarSource.displayName) usage — session | weekly"
+        }
     }
 
     // MARK: - Display formatters (menu bar + popup)
@@ -358,6 +404,33 @@ final class ProviderStore: ObservableObject {
         }
         if id == .claude { return localWeeklyDisplay() }
         return "—"
+    }
+
+    func antigravityMenubarDisplay() -> String {
+        let gemini = antigravityMenubarPart(matching: isGeminiAntigravityLane)
+        let claudeGPT = antigravityMenubarPart(matching: isClaudeGPTAntigravityLane)
+        return "\(gemini) | \(claudeGPT)"
+    }
+
+    private func isGeminiAntigravityLane(_ lane: ProviderQuotaLane) -> Bool {
+        lane.group == "Gemini" || lane.label.localizedCaseInsensitiveContains("Gemini")
+    }
+
+    private func isClaudeGPTAntigravityLane(_ lane: ProviderQuotaLane) -> Bool {
+        if lane.group == "Claude" || lane.group == "OpenAI" { return true }
+        return lane.label.localizedCaseInsensitiveContains("Claude")
+            || lane.label.localizedCaseInsensitiveContains("GPT")
+            || lane.label.localizedCaseInsensitiveContains("OpenAI")
+    }
+
+    private func antigravityMenubarPart(matching predicate: (ProviderQuotaLane) -> Bool) -> String {
+        guard let lanes = usages[.antigravity]?.quotaLanes else { return "—" }
+        let matching = lanes.filter(predicate)
+        guard let highest = matching.max(by: { $0.pct < $1.pct }) else { return "—" }
+        if highest.pct >= 99.99, let resetAt = highest.resetAt, resetAt > Date() {
+            return formatSessionCountdown(resetAt.timeIntervalSinceNow)
+        }
+        return String(format: "%.2f%%", highest.pct)
     }
 
     private func localSessionDisplay() -> String {

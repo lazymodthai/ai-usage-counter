@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="Claude Usage Counter"
-VERSION="1.1.0"
+VERSION="1.2.0"
 BUILD_DIR="build"
 APP_PATH="${BUILD_DIR}/${APP_NAME}.app"
 DMG_NAME="ClaudeUsageCounter-${VERSION}.dmg"
