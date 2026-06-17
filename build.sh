@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="Claude Usage Counter"
 BINARY_NAME="ClaudeUsageCounter"
 BUNDLE_ID="com.lazymodthai.claude-usage-counter"
-VERSION="1.1.0"
+VERSION="1.2.0"
 BUILD_DIR="build"
 APP_PATH="${BUILD_DIR}/${APP_NAME}.app"
 ICON_SRC="icon.png"

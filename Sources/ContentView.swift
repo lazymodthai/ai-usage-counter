@@ -17,6 +17,7 @@ extension Color {
         case .claude: return .accent
         case .codex:  return .haikuGreen
         case .gemini: return .opusBlue
+        case .antigravity: return Color(red: 0.70, green: 0.48, blue: 1.0)
         }
     }
 }
@@ -24,22 +25,148 @@ extension Color {
 // MARK: - Root
 struct ContentView: View {
     @EnvironmentObject var store: ProviderStore
+    let fixedHeight: CGFloat?
+
+    init(fixedHeight: CGFloat? = nil) {
+        self.fixedHeight = fixedHeight
+    }
+
+    private var leftProviders: [ProviderID] {
+        store.visibleProviderIDs.filter { $0 != .antigravity }
+    }
+
+    private var visibleColumns: [[ProviderID]] {
+        let hasAntigravity = store.visibleProviders.contains(.antigravity)
+        if !leftProviders.isEmpty && hasAntigravity {
+            return [leftProviders, [.antigravity]]
+        }
+        if hasAntigravity { return [[.antigravity]] }
+        return [leftProviders]
+    }
+
+    private var usesTwoColumns: Bool { visibleColumns.count == 2 }
+    private var contentWidth: CGFloat { usesTwoColumns ? 640 : 320 }
 
     var body: some View {
-        ZStack {
-            Color.appBg.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            Color.appBg
             VStack(spacing: 0) {
                 HeaderRow()
                 Rectangle().fill(Color.divider).frame(height: 1)
-                ForEach(ProviderID.allCases) { id in
-                    ProviderSection(providerID: id)
-                    Rectangle().fill(Color.divider).frame(height: 1)
+                if fixedHeight == nil {
+                    columns
+                } else {
+                    ScrollView(.vertical) {
+                        columns
+                    }
+                    .scrollIndicators(.visible)
                 }
+                Rectangle().fill(Color.divider).frame(height: 1)
                 FooterRow()
             }
         }
-        .frame(width: 320)
+        .frame(width: contentWidth)
+        .frame(height: fixedHeight, alignment: .top)
         .onAppear { store.refreshAll() }
+    }
+
+    @ViewBuilder
+    private var columns: some View {
+        if usesTwoColumns {
+            HStack(alignment: .top, spacing: 0) {
+                ProviderColumn(providerIDs: visibleColumns[0])
+                    .frame(width: 319)
+                Rectangle().fill(Color.divider).frame(width: 1)
+                ProviderColumn(providerIDs: visibleColumns[1])
+                    .frame(width: 320)
+            }
+        } else {
+            ProviderColumn(providerIDs: visibleColumns.first ?? [])
+        }
+    }
+}
+
+struct PopupWindowRootView: View {
+    let contentWidth: CGFloat
+    let contentHeight: CGFloat
+    let arrowX: CGFloat
+
+    private let arrowHeight: CGFloat = 10
+    private let cornerRadius: CGFloat = 16
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            PopupChromeShape(arrowX: arrowX, arrowHeight: arrowHeight, cornerRadius: cornerRadius)
+                .fill(Color.appBg)
+            PopupChromeShape(arrowX: arrowX, arrowHeight: arrowHeight, cornerRadius: cornerRadius)
+                .stroke(Color.white.opacity(0.25), lineWidth: 1)
+            ContentView(fixedHeight: contentHeight)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .offset(y: arrowHeight)
+        }
+        .frame(width: contentWidth, height: contentHeight + arrowHeight)
+        .background(Color.clear)
+    }
+}
+
+struct PopupChromeShape: Shape {
+    let arrowX: CGFloat
+    let arrowHeight: CGFloat
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let arrowHalfWidth: CGFloat = 10
+        let topY = rect.minY + arrowHeight
+        let bottomY = rect.maxY
+        let leftX = rect.minX
+        let rightX = rect.maxX
+        let arrowCenterX = min(
+            max(arrowX, leftX + cornerRadius + arrowHalfWidth),
+            rightX - cornerRadius - arrowHalfWidth
+        )
+
+        var path = Path()
+        path.move(to: CGPoint(x: leftX + cornerRadius, y: topY))
+        path.addLine(to: CGPoint(x: arrowCenterX - arrowHalfWidth, y: topY))
+        path.addLine(to: CGPoint(x: arrowCenterX, y: rect.minY))
+        path.addLine(to: CGPoint(x: arrowCenterX + arrowHalfWidth, y: topY))
+        path.addLine(to: CGPoint(x: rightX - cornerRadius, y: topY))
+        path.addQuadCurve(
+            to: CGPoint(x: rightX, y: topY + cornerRadius),
+            control: CGPoint(x: rightX, y: topY)
+        )
+        path.addLine(to: CGPoint(x: rightX, y: bottomY - cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: rightX - cornerRadius, y: bottomY),
+            control: CGPoint(x: rightX, y: bottomY)
+        )
+        path.addLine(to: CGPoint(x: leftX + cornerRadius, y: bottomY))
+        path.addQuadCurve(
+            to: CGPoint(x: leftX, y: bottomY - cornerRadius),
+            control: CGPoint(x: leftX, y: bottomY)
+        )
+        path.addLine(to: CGPoint(x: leftX, y: topY + cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: leftX + cornerRadius, y: topY),
+            control: CGPoint(x: leftX, y: topY)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ProviderColumn: View {
+    let providerIDs: [ProviderID]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(providerIDs.enumerated()), id: \.element.id) { index, id in
+                ProviderSection(providerID: id)
+                if index < providerIDs.count - 1 {
+                    Rectangle().fill(Color.divider).frame(height: 1)
+                }
+            }
+        }
     }
 }
 
@@ -74,6 +201,13 @@ struct HeaderRow: View {
             .popover(isPresented: $store.showSettings) {
                 SettingsView().environmentObject(store)
             }
+            Button(action: { NSApp.terminate(nil) }) {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .help("Quit AI Usage Counter")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -89,6 +223,9 @@ struct ProviderSection: View {
     private var isConnected: Bool { authState == .signedIn }
     private var hasBars: Bool { isConnected || providerID == .claude }
     private var isOnMenubar: Bool { store.menubarSource == providerID }
+    private var quotaBars: [(lane: ProviderQuotaLane, vm: UsageBarVM)] {
+        store.quotaBars(for: providerID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -100,7 +237,7 @@ struct ProviderSection: View {
                 Text(providerID.displayName)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
-                if providerID == .gemini && isConnected {
+                if (providerID == .gemini || providerID == .antigravity) && isConnected {
                     Text("beta")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(Color.white.opacity(0.4))
@@ -152,6 +289,18 @@ struct ProviderSection: View {
                         label: "Weekly", icon: "calendar",
                         iconColor: .sonnetCyan, vm: vm)
                 }
+                ForEach(quotaBars, id: \.lane.id) { item in
+                    UsageBarRow(
+                        label: item.lane.label,
+                        icon: "gauge.with.dots.needle.bottom.50percent",
+                        iconColor: Color.tint(for: providerID),
+                        vm: item.vm)
+                }
+                if providerID != .claude
+                    && store.usages[providerID] == nil
+                    && authState == .signedIn {
+                    ProviderFetchStatusRow(providerID: providerID)
+                }
             } else if authState == .signedOut {
                 Text("Not connected")
                     .font(.system(size: 10))
@@ -160,6 +309,35 @@ struct ProviderSection: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+}
+
+struct ProviderFetchStatusRow: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    private var isFetching: Bool { store.fetchingProviders.contains(providerID) }
+    private var failureCount: Int { store.fetchFailures[providerID] ?? 0 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isFetching {
+                ProgressView().scaleEffect(0.55).tint(Color.white.opacity(0.5))
+            } else if failureCount > 0 {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.yellow.opacity(0.75))
+            }
+            Text(statusText)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.white.opacity(0.35))
+        }
+    }
+
+    private var statusText: String {
+        if isFetching { return "Fetching usage..." }
+        if failureCount > 0 { return "Usage not found. Retrying..." }
+        return "Waiting to fetch usage..."
     }
 }
 
@@ -341,6 +519,19 @@ struct SettingsView: View {
 
                         Rectangle().fill(Color.divider).frame(height: 1)
 
+                        // Visible agents
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label("Visible Agents", systemImage: "eye")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.white.opacity(0.5))
+
+                            ForEach(ProviderID.allCases) { id in
+                                VisibleProviderRow(providerID: id)
+                            }
+                        }
+
+                        Rectangle().fill(Color.divider).frame(height: 1)
+
                         // Menu bar source
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Menu Bar Shows", systemImage: "menubar.rectangle")
@@ -415,8 +606,9 @@ struct SettingsView: View {
     }
 
     private var menubarChoices: [ProviderID] {
-        var choices = store.connectedProviders
-        if choices.isEmpty { choices = [.claude] }
+        var choices = store.visibleConnectedProviders
+        if choices.isEmpty, store.isProviderVisible(.claude) { choices = [.claude] }
+        if choices.isEmpty { choices = store.visibleProviderIDs }
         if !choices.contains(store.menubarSource) { choices.append(store.menubarSource) }
         return choices
     }
@@ -490,6 +682,38 @@ struct ProviderAccountRow: View {
         case .expired:   return .yellow
         case .signedOut: return Color.white.opacity(0.35)
         }
+    }
+}
+
+struct VisibleProviderRow: View {
+    @EnvironmentObject var store: ProviderStore
+    let providerID: ProviderID
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { store.isProviderVisible(providerID) },
+            set: { store.setProviderVisible(providerID, visible: $0) }
+        )) {
+            HStack(spacing: 7) {
+                Image(systemName: providerID.symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.tint(for: providerID))
+                    .frame(width: 14)
+                Text(providerID.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white)
+                if providerID == .antigravity {
+                    Text("right column")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(store.visibleProviderIDs.count == 1 && store.isProviderVisible(providerID))
     }
 }
 
