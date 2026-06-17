@@ -1,17 +1,22 @@
 import Foundation
 import WebKit
 
-// Antigravity quota via the Antigravity web surface. It intentionally shares
-// Gemini's WKWebsiteDataStore, so one Google login unlocks both providers.
+// Antigravity quota via the local Antigravity language server. This mirrors the
+// quota monitor extension's "Local Monitoring" path:
+//   scan language_server command lines for --csrf_token
+//   find that process' listening ports
+//   POST /exa.language_server_pb.LanguageServerService/GetUserStatus
 @MainActor
 final class AntigravityProvider: UsageProvider {
     let id = ProviderID.antigravity
     private let dataStore = ProviderDataStores.store(for: .antigravity)
-    private lazy var webFetcher = WebViewFetcher(dataStore: dataStore)
+
+    private static let userStatusPath = "/exa.language_server_pb.LanguageServerService/GetUserStatus"
 
     // MARK: - Auth
 
     func checkAuth() async -> AuthState {
+        if !Self.discoverServers().isEmpty { return .signedIn }
         let signedIn = await dataStore.hasCookie(domain: "google.com") {
             ["SID", "__Secure-1PSID", "SAPISID"].contains($0.name)
         }
@@ -25,8 +30,8 @@ final class AntigravityProvider: UsageProvider {
             title: "Sign in to Antigravity",
             startURL: URL(string: "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fantigravity.google%2F")!,
             dataStore: dataStore,
-            loginCheck: { _, url in
-                guard url.host?.contains("antigravity.google") == true else { return false }
+            loginCheck: { _, _ in
+                if !Self.discoverServers().isEmpty { return true }
                 return await store.hasCookie(domain: "google.com") {
                     ["SID", "__Secure-1PSID", "SAPISID"].contains($0.name)
                 }
@@ -35,143 +40,190 @@ final class AntigravityProvider: UsageProvider {
     }
 
     func signOut() async {
-        webFetcher.release()
         await dataStore.wipeAllData()
     }
 
-    func releaseIdleResources() {
-        webFetcher.release()
-    }
+    func releaseIdleResources() {}
 
     // MARK: - Fetch
 
     func fetchUsage() async -> FetchResult {
-        let script = """
-        try {
-            if (location.host.indexOf('accounts.google.com') >= 0) {
-                return JSON.stringify({ error: 'auth' });
-            }
-            function pageText() {
-                return (document.body.innerText || '').replace(/\\u00a0/g, ' ');
-            }
-            function normalizePct(value, text) {
-                const pct = parseFloat(value);
-                return /left|remain/i.test(text) ? Math.max(0, 100 - pct) : pct;
-            }
-            function titleCaseLabel(s) {
-                return s.replace(/\\s+/g, ' ').trim();
-            }
-            function cleanReset(s) {
-                if (!s) return null;
-                return s
-                    .replace(/^\\s*(?:->|resets?\\s*(?:in|at)?|reset\\s*(?:in|at)?)\\s*/i, '')
-                    .replace(/\\s+/g, ' ')
-                    .trim();
-            }
-            function quotaLanes(text) {
-                const lines = text.split('\\n').map(s => s.trim()).filter(Boolean);
-                const lanes = [];
-                let group = null;
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    if (/^(Gemini Flash|Gemini Pro|Claude|OpenAI|GPT|Antigravity)$/i.test(line)
-                        && !/(\\d+(?:\\.\\d+)?)\\s*%/.test(line)
-                        && line.length < 80) {
-                        group = titleCaseLabel(line);
-                        continue;
-                    }
-
-                    const window = lines.slice(i, i + 5).join(' ');
-                    const pct = window.match(/(\\d+(?:\\.\\d+)?)\\s*%/);
-                    if (!pct) continue;
-
-                    const model = line.match(/((?:Gemini|Claude|GPT|OpenAI)[A-Za-z0-9 ._-]*(?:\\([^)]*\\))?)/i)
-                        || window.match(/((?:Gemini|Claude|GPT|OpenAI)[A-Za-z0-9 ._-]*(?:\\([^)]*\\))?)/i);
-                    if (!model) continue;
-
-                    const label = titleCaseLabel(model[1]);
-                    if (lanes.some(l => l.label.toLowerCase() === label.toLowerCase())) continue;
-
-                    const reset = window.match(/(?:->|resets?\\s*(?:in|at)?|reset\\s*(?:in|at)?)\\s*([^|\\n]{1,80})/i);
-                    lanes.push({
-                        id: label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                        label,
-                        group,
-                        pct: normalizePct(pct[1], window),
-                        reset: cleanReset(reset ? reset[1] : null)
-                    });
+        for server in Self.discoverServers() {
+            for port in Self.listeningPorts(forPID: server.pid) {
+                guard let payload = await Self.fetchUserStatus(port: port, csrfToken: server.csrfToken),
+                      let usage = Self.parseUserStatus(payload) else {
+                    continue
                 }
-                return lanes;
+                return .success(usage)
             }
-            function clickMatch(re) {
-                const els = Array.from(document.querySelectorAll(
-                    'button, [role=\"button\"], [role=\"menuitem\"], [role=\"tab\"], a'));
-                const el = els.find(e => {
-                    const label = e.getAttribute('aria-label') || '';
-                    const txt = (e.textContent || '').trim();
-                    return re.test(label) || (txt.length > 0 && txt.length < 50 && re.test(txt));
-                });
-                if (el) { el.click(); return true; }
-                return false;
-            }
-
-            let lanes = quotaLanes(pageText());
-            if (lanes.length === 0) {
-                clickMatch(/quota|usage|limit|rate/i);
-                for (let i = 0; i < 6 && lanes.length === 0; i++) {
-                    await new Promise(res => setTimeout(res, 1000));
-                    lanes = quotaLanes(pageText());
-                }
-            }
-
-            return JSON.stringify(lanes.length > 0 ? { data: { lanes } } : { error: 'notfound' });
-        } catch (e) {
-            return JSON.stringify({ error: String(e) });
         }
-        """
-        guard let raw = await webFetcher.run(
-                pageURL: URL(string: "https://antigravity.google/")!,
-                script: script,
-                reloadIfOlderThan: 0,
-                settleDelay: 3.0),
-              let data = raw.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            webFetcher.invalidatePage()
-            return .failure
-        }
-        if (obj["error"] as? String) == "auth" { return .authExpired }
-        guard let payload = obj["data"] as? [String: Any] else {
-            webFetcher.invalidatePage()
-            return .failure
-        }
-
-        let lanes = parseQuotaLanes(payload["lanes"], relativeTo: Date())
-        guard !lanes.isEmpty else { return .failure }
-        var usage = ProviderUsage(fetchedAt: Date())
-        usage.quotaLanes = lanes
-        return .success(usage)
+        return .failure
     }
 
-    private func parseQuotaLanes(_ any: Any?, relativeTo now: Date) -> [ProviderQuotaLane] {
-        guard let rows = any as? [[String: Any]] else { return [] }
-        return rows.compactMap { row in
-            guard
-                let id = row["id"] as? String,
-                let label = row["label"] as? String,
-                let pct = providerNum(row["pct"])
-            else { return nil }
-            let resetText = row["reset"] as? String
+    // MARK: - Local process discovery
+
+    private struct ServerCandidate {
+        let pid: Int
+        let csrfToken: String
+        let score: Int
+    }
+
+    private static func discoverServers() -> [ServerCandidate] {
+        let output = runCommand("/bin/ps", ["ax", "-o", "pid=,ppid=,command="])
+        let lines = output.split(separator: "\n").map(String.init)
+        let currentWorkspaceHint = "project_claude_usage_counter"
+
+        return lines.compactMap { line -> ServerCandidate? in
+            guard line.contains("language_server"),
+                  line.contains("--csrf_token"),
+                  line.contains("antigravity") else { return nil }
+            let parts = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
+            guard let pidText = parts.first, let pid = Int(pidText) else { return nil }
+            guard let token = firstMatch(in: line, pattern: #"--csrf_token[=\s]+([A-Za-z0-9-]+)"#) else {
+                return nil
+            }
+
+            var score = 0
+            if line.contains(currentWorkspaceHint) { score += 100 }
+            if line.contains("--app_data_dir antigravity-ide") { score += 20 }
+            if line.contains("--enable_lsp") { score += 10 }
+            if line.contains("--standalone") { score += 5 }
+            return ServerCandidate(pid: pid, csrfToken: token, score: score)
+        }
+        .sorted { $0.score > $1.score }
+    }
+
+    private static func listeningPorts(forPID pid: Int) -> [Int] {
+        let output = runCommand("/usr/sbin/lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", "\(pid)"])
+        return output
+            .split(separator: "\n")
+            .compactMap { line -> Int? in
+                guard let port = firstMatch(in: String(line), pattern: #":(\d+)\s+\(LISTEN\)"#) else {
+                    return nil
+                }
+                return Int(port)
+            }
+    }
+
+    private static func runCommand(_ launchPath: String, _ arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
+    }
+
+    private static func firstMatch(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: text, range: range),
+              match.numberOfRanges > 1 else { return nil }
+        return ns.substring(with: match.range(at: 1))
+    }
+
+    // MARK: - Local API
+
+    private static func fetchUserStatus(port: Int, csrfToken: String) async -> [String: Any]? {
+        guard let url = URL(string: "http://127.0.0.1:\(port)\(Self.userStatusPath)") else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        request.setValue(csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "metadata": [
+                "ideName": "antigravity",
+                "extensionName": "antigravity",
+                "locale": "en",
+            ]
+        ])
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            return obj
+        } catch {
+            return nil
+        }
+    }
+
+    private static func parseUserStatus(_ root: [String: Any]) -> ProviderUsage? {
+        guard let userStatus = root["userStatus"] as? [String: Any],
+              let configData = userStatus["cascadeModelConfigData"] as? [String: Any],
+              let modelConfigs = configData["clientModelConfigs"] as? [[String: Any]] else {
+            return nil
+        }
+
+        let now = Date()
+        let lanes = modelConfigs.compactMap { item -> ProviderQuotaLane? in
+            guard let label = item["label"] as? String else { return nil }
+            let quotaInfo = item["quotaInfo"] as? [String: Any] ?? [:]
+            let remainingFraction = providerNum(quotaInfo["remainingFraction"]) ?? 0
+            let remainingPct = min(max(remainingFraction * 100, 0), 100)
+            let usedPct = 100 - remainingPct
+            let resetAt = providerDate(quotaInfo["resetTime"])
+
             return ProviderQuotaLane(
-                id: id,
+                id: stableID(for: item, fallback: label),
                 label: label,
-                group: row["group"] as? String,
-                pct: min(max(pct, 0), 100),
-                resetAt: resetText.flatMap {
-                    ResetTimeParser.parseSessionReset($0, relativeTo: now)
-                        ?? ResetTimeParser.parseWeeklyReset($0, relativeTo: now)
-                },
-                resetText: resetText
+                group: modelGroup(for: label),
+                pct: usedPct,
+                resetAt: resetAt,
+                resetText: resetAt.map { formatDuration($0.timeIntervalSince(now)) }
             )
         }
+
+        guard !lanes.isEmpty else { return nil }
+        var usage = ProviderUsage(fetchedAt: now)
+        usage.planName = ((userStatus["planStatus"] as? [String: Any])?["planInfo"] as? [String: Any])?["planName"] as? String
+        usage.quotaLanes = lanes
+        return usage
+    }
+
+    private static func stableID(for item: [String: Any], fallback: String) -> String {
+        if let model = (item["modelOrAlias"] as? [String: Any])?["model"] as? String {
+            return model
+        }
+        return fallback.lowercased().replacingOccurrences(
+            of: #"[^a-z0-9]+"#,
+            with: "-",
+            options: .regularExpression
+        )
+    }
+
+    private static func modelGroup(for label: String) -> String? {
+        if label.localizedCaseInsensitiveContains("Gemini") { return "Gemini" }
+        if label.localizedCaseInsensitiveContains("Claude") { return "Claude" }
+        if label.localizedCaseInsensitiveContains("GPT") { return "OpenAI" }
+        return nil
+    }
+
+    private static func formatDuration(_ secs: TimeInterval) -> String {
+        let total = max(0, Int(secs))
+        let days = total / 86_400
+        let hours = (total % 86_400) / 3_600
+        let minutes = (total % 3_600) / 60
+        if days > 0 { return "\(days)d \(hours)h \(minutes)m" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(minutes)m"
     }
 }
