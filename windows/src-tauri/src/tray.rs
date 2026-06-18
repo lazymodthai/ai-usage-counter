@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, Runtime,
+    Emitter, Manager, Runtime,
 };
 
 pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
@@ -13,7 +13,7 @@ pub fn setup<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 
     let menu = Menu::with_items(app, &[&show, &hide, &compact, &sep, &quit])?;
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .tooltip("AI Usage Counter  (Ctrl+Shift+U)")

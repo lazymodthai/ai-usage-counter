@@ -66,6 +66,18 @@ export interface ClaudeLocalUsage {
   fetched_at: string
 }
 
+// Rust response shape from get_codex_usage / get_gemini_usage
+export interface ProviderUsageResult {
+  session_pct: number | null
+  session_reset_secs: number | null
+  weekly_pct: number | null
+  weekly_reset_secs: number | null
+  quota_lanes: AntigravityLane[]
+  plan_name: string | null
+  is_auth_expired: boolean
+  fetched_at: string
+}
+
 export interface AntigravityUsage {
   plan_name: string | null
   lanes: AntigravityLane[]

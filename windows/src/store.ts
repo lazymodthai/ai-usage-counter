@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow, PhysicalPosition, LogicalSize } from '@tauri-apps/api/window'
-import type { ProviderID, ProviderState, AppState, ClaudeLocalUsage, AntigravityUsage } from './types'
+import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow, PhysicalPosition, LogicalSize, currentMonitor } from '@tauri-apps/api/window'
+import type { ProviderID, ProviderState, AppState, ClaudeLocalUsage, AntigravityUsage, ProviderUsageResult } from './types'
 import { ALL_PROVIDERS } from './types'
 import { formatTokens, formatCountdown, formatResetLabel } from './utils'
 
@@ -16,6 +17,9 @@ interface Store extends AppState {
   refreshInterval: number
 
   refreshAll: () => Promise<void>
+  loadProviderAuthStates: () => Promise<void>
+  openLoginWindow: (provider: ProviderID) => Promise<void>
+  signOutProvider: (provider: ProviderID) => Promise<void>
   setMenubarSource: (id: ProviderID) => void
   setOpacity: (v: number) => void
   setAlwaysOnTop: (v: boolean) => void
@@ -65,6 +69,36 @@ function mapClaudeUsage(u: ClaudeLocalUsage): ProviderState {
   }
 }
 
+function mapProviderUsage(u: ProviderUsageResult): ProviderState {
+  const pctToFraction = (pct: number | null) => pct != null ? pct / 100 : 0
+  return {
+    authState: u.is_auth_expired ? 'expired' : 'signed_in',
+    usingLocal: false,
+    fetchedAt: new Date(u.fetched_at),
+    quotaLanes: u.quota_lanes.map(l => ({
+      id: l.id,
+      label: l.label,
+      group: l.group,
+      pct: l.pct,
+      resetText: l.reset_text,
+    })),
+    sessionBar: u.session_pct != null ? {
+      fraction: pctToFraction(u.session_pct),
+      usedText: `${u.session_pct.toFixed(1)}%`,
+      limitText: '100%',
+      resetLabel: u.session_reset_secs != null ? formatCountdown(u.session_reset_secs) : '',
+      isActive: true,
+    } : null,
+    weeklyBar: u.weekly_pct != null ? {
+      fraction: pctToFraction(u.weekly_pct),
+      usedText: `${u.weekly_pct.toFixed(1)}%`,
+      limitText: '100%',
+      resetLabel: u.weekly_reset_secs != null ? formatResetLabel(u.weekly_reset_secs) : '',
+      isActive: true,
+    } : null,
+  }
+}
+
 export const useStore = create<Store>((set, get) => ({
   providers: {
     claude: defaultProvider(),
@@ -90,6 +124,39 @@ export const useStore = create<Store>((set, get) => ({
   weeklyTokenLimit: Number(localStorage.getItem('weeklyTokenLimit')) || 0,
   refreshInterval: Number(localStorage.getItem('refreshInterval')) || 60,
 
+  loadProviderAuthStates: async () => {
+    for (const provider of ['codex', 'gemini'] as ProviderID[]) {
+      try {
+        const authState = await invoke<string>('get_provider_auth_state', { provider })
+        set(state => ({
+          providers: {
+            ...state.providers,
+            [provider]: {
+              ...state.providers[provider],
+              authState: authState as 'signed_in' | 'signed_out' | 'expired',
+            },
+          },
+        }))
+      } catch (e) {
+        // ignore — stays signed_out
+      }
+    }
+  },
+
+  openLoginWindow: async (provider: ProviderID) => {
+    await invoke('open_login_window', { provider })
+  },
+
+  signOutProvider: async (provider: ProviderID) => {
+    await invoke('sign_out_provider', { provider })
+    set(state => ({
+      providers: {
+        ...state.providers,
+        [provider]: { ...state.providers[provider], authState: 'signed_out', sessionBar: null, weeklyBar: null, quotaLanes: [] },
+      },
+    }))
+  },
+
   refreshAll: async () => {
     set({ isLoading: true })
     try {
@@ -99,6 +166,34 @@ export const useStore = create<Store>((set, get) => ({
       }))
     } catch (e) {
       console.error('Claude local usage error:', e)
+    }
+
+    // Fetch Codex usage if signed in
+    const codexAuth = get().providers.codex.authState
+    if (codexAuth === 'signed_in' || codexAuth === 'expired') {
+      try {
+        const result = await invoke<ProviderUsageResult | null>('get_codex_usage')
+        if (result) {
+          const mapped = mapProviderUsage(result)
+          set(state => ({ providers: { ...state.providers, codex: mapped } }))
+        }
+      } catch (e) {
+        console.error('Codex usage error:', e)
+      }
+    }
+
+    // Fetch Gemini usage if signed in
+    const geminiAuth = get().providers.gemini.authState
+    if (geminiAuth === 'signed_in' || geminiAuth === 'expired') {
+      try {
+        const result = await invoke<ProviderUsageResult | null>('get_gemini_usage')
+        if (result) {
+          const mapped = mapProviderUsage(result)
+          set(state => ({ providers: { ...state.providers, gemini: mapped } }))
+        }
+      } catch (e) {
+        console.error('Gemini usage error:', e)
+      }
     }
 
     try {
@@ -209,14 +304,37 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   initWindow: async () => {
+    // Load Codex/Gemini auth states from disk before showing UI
+    await useStore.getState().loadProviderAuthStates()
+
     try {
       const win = getCurrentWindow()
 
-      // Restore saved position
+      // Restore saved position, or place bottom-right on first launch
       const saved = localStorage.getItem('windowPos')
       if (saved) {
         const { x, y } = JSON.parse(saved) as { x: number; y: number }
         await win.setPosition(new PhysicalPosition(x, y))
+      } else {
+        // First launch: place overlay at bottom-right near system tray
+        try {
+          const monitor = await currentMonitor()
+          if (monitor) {
+            const { width, height } = monitor.size
+            const scaleFactor = monitor.scaleFactor
+            // overlay is 320×500 logical px, convert to physical
+            const overlayW = Math.round(320 * scaleFactor)
+            const overlayH = Math.round(500 * scaleFactor)
+            const margin = Math.round(16 * scaleFactor)
+            const taskbarH = Math.round(48 * scaleFactor)
+            await win.setPosition(new PhysicalPosition(
+              width - overlayW - margin,
+              height - overlayH - taskbarH - margin,
+            ))
+          }
+        } catch {}
+        // Show first-launch notification pointing to tray icon
+        await invoke('show_first_launch_tip').catch(() => {})
       }
 
       // Apply always-on-top
@@ -245,6 +363,19 @@ export const useStore = create<Store>((set, get) => ({
       // Listen for tray show event (restores from hide)
       await win.listen('tauri://focus', () => {
         // nothing needed — Tauri shows window automatically
+      })
+
+      // Refresh auth state when a provider login window closes
+      await listen<string>('auth-state-changed', (event) => {
+        const provider = event.payload as ProviderID
+        set(state => ({
+          providers: {
+            ...state.providers,
+            [provider]: { ...state.providers[provider], authState: 'signed_in' },
+          },
+        }))
+        // Immediately fetch usage for the newly logged-in provider
+        useStore.getState().refreshAll()
       })
     } catch {}
   },

@@ -15,6 +15,8 @@ interface Props {
 
 export function ProviderSection({ providerID }: Props) {
   const provider = useStore(s => s.providers[providerID])
+  const openLoginWindow = useStore(s => s.openLoginWindow)
+  const signOutProvider = useStore(s => s.signOutProvider)
   const { authState, sessionBar, weeklyBar, quotaLanes, usingLocal } = provider
   const isConnected = authState === 'signed_in'
   const hasBars = isConnected || providerID === 'claude'
@@ -41,11 +43,20 @@ export function ProviderSection({ providerID }: Props) {
 
         <div className="spacer" />
 
-        {!isConnected && (
+        {isConnected && providerID !== 'claude' && providerID !== 'antigravity' && (
+          <button
+            className="sign-out-btn"
+            style={{ color: tint, opacity: 0.5, fontSize: 9 }}
+            onClick={() => signOutProvider(providerID)}
+          >
+            Sign out
+          </button>
+        )}
+        {!isConnected && providerID !== 'claude' && providerID !== 'antigravity' && (
           <button
             className="sign-in-btn"
             style={{ color: tint }}
-            onClick={() => {/* TODO: OAuth login */}}
+            onClick={() => openLoginWindow(providerID)}
           >
             {authState === 'expired' ? 'Re-sign in' : 'Sign in'}
           </button>

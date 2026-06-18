@@ -35,7 +35,9 @@ final class FileWatcher {
                 let watcher = Unmanaged<FileWatcher>.fromOpaque(info).takeUnretainedValue()
 
                 // Only react to .jsonl changes
-                guard let paths = eventPaths as? [String],
+                // kFSEventStreamCreateFlagUseCFTypes delivers a CFArray via raw pointer
+                let pathsNS = Unmanaged<NSArray>.fromOpaque(eventPaths).takeUnretainedValue()
+                guard let paths = pathsNS as? [String],
                       paths.contains(where: { $0.hasSuffix(".jsonl") }) else { return }
 
                 watcher.scheduleDebounced()
@@ -48,7 +50,7 @@ final class FileWatcher {
         )
 
         guard let stream = streamRef else { return }
-        FSEventStreamScheduleWithRunLoop(stream, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
         FSEventStreamStart(stream)
     }
 

@@ -78,8 +78,11 @@ final class WebAuthController: NSObject, WKUIDelegate, WKNavigationDelegate, NSW
                              createWebViewWith configuration: WKWebViewConfiguration,
                              for navigationAction: WKNavigationAction,
                              windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url {
-            DispatchQueue.main.async { webView.load(URLRequest(url: url)) }
+        // WebKit always calls this on the main thread
+        MainActor.assumeIsolated {
+            if let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
+            }
         }
         return nil
     }

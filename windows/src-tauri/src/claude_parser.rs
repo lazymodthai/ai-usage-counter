@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
-use chrono::{DateTime, Datelike, Duration, Local, TimeZone, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, Local, TimeZone, Utc};
 
 use crate::models::{ClaudeLocalUsage, JsonlEntry, TokenUsage};
 

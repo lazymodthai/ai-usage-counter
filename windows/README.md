@@ -1,52 +1,66 @@
 # AI Usage Counter — Windows/macOS Overlay
 
-Floating overlay แสดง usage ของ Claude / Codex / Gemini ที่ลากย้ายตำแหน่งได้ทุกที่บนหน้าจอ  
+Floating overlay แสดง usage ของ Claude / Antigravity ที่ลากย้ายตำแหน่งได้ทุกที่บนหน้าจอ  
 สร้างด้วย [Tauri](https://tauri.app) (Rust + React) — รองรับทั้ง **Windows** และ **macOS**
+
+---
+
+## สถานะ Provider
+
+| Provider | Windows | macOS (Tauri) | หมายเหตุ |
+|---|---|---|---|
+| **Claude** | ✅ | ✅ | อ่าน `~/.claude/projects/**/*.jsonl` ไม่ต้อง login |
+| **Antigravity** | ✅ | ✅ | ค้นหา language server process อัตโนมัติ |
+| **Codex** | ✅ | ✅ | WebView login → Bearer token → `/backend-api/wham/usage` |
+| **Gemini** | ✅ | ✅ | WebView login → DOM scrape Usage Limits page |
 
 ---
 
 ## ติดตั้ง
 
-### macOS
+### วิธีที่ 1 — ดาวน์โหลดจาก GitHub Releases (แนะนำ)
+
+> ไม่ต้องติดตั้ง Rust หรือ Node.js
+
+1. ไปที่ **[Releases](../../releases/latest)** ของ repo นี้
+2. ดาวน์โหลด **`ai-usage-counter_x.x.x_x64_en-US.msi`** (แนะนำ) หรือ **`ai-usage-counter_x.x.x_x64-setup.exe`**
+3. ดับเบิลคลิกไฟล์ที่ดาวน์โหลดมา → คลิก "ติดตั้ง" → เสร็จ
+
+> **ความต้องการของระบบ:** Windows 10 (1803+) พร้อม WebView2  
+> (WebView2 มักมีอยู่แล้วหากใช้ Microsoft Edge — ถ้าไม่มี Windows จะแจ้งให้ติดตั้งอัตโนมัติ)
+
+---
+
+### วิธีที่ 2 — Build เอง (Windows)
+
+รันคำเดียวได้ installer เลย:
+
+```powershell
+# clone repo ก่อน จากนั้น:
+cd windows
+powershell -ExecutionPolicy Bypass -File release.ps1
+```
+
+Script จะ:
+- ตรวจและติดตั้ง Rust · Node.js · WebView2 · MSVC Build Tools อัตโนมัติ
+- รัน `npm run tauri build`
+- แสดงที่อยู่ไฟล์ `.msi` / `.exe` ที่ build ได้
+- ถามว่าจะเปิด folder หรือไม่
+
+> Build ครั้งแรกอาจใช้เวลา 10–20 นาที (Rust compile) — ครั้งถัดไปเร็วขึ้นมากเพราะมี cache
+
+---
+
+### Build เอง (macOS)
 
 ```bash
-# 1. Clone และเข้า folder นี้
 cd windows
-
-# 2. รัน install script
 chmod +x install.sh
 ./install.sh
 
-# 3. Dev mode
-npm run tauri dev
-
-# 4. Build .app
 npm run tauri build
 # → ได้ไฟล์ที่ src-tauri/target/release/bundle/macos/
 ```
-
-> **Prerequisites ที่ script จัดการให้อัตโนมัติ:**  
-> Xcode CLT · Rust · npm packages · App icons
-
-### Windows
-
-```powershell
-# 1. Clone และเข้า folder นี้
-cd windows
-
-# 2. รัน install script
-powershell -ExecutionPolicy Bypass -File install.ps1
-
-# 3. Dev mode
-npm run tauri dev
-
-# 4. Build .exe installer
-npm run tauri build
-# → ได้ไฟล์ที่ src-tauri\target\release\bundle\msi\
-```
-
-> **Prerequisites ที่ script จัดการให้อัตโนมัติ:**  
-> Rust · Node.js · WebView2 · MSVC Build Tools · npm packages · App icons
 
 ---
 
@@ -72,6 +86,7 @@ npm run tauri icon ../icon.png
 | `tauri-plugin-global-shortcut` | keyboard shortcuts |
 | `chrono` | parse timestamp จาก JSONL |
 | `dirs` | หา home directory |
+| `regex` | parse process command line |
 | `serde / serde_json` | JSON parsing |
 
 ---
@@ -90,8 +105,9 @@ npm run tauri icon ../icon.png
 │   ████░░░░░░  41.00%               │
 │   36.1M / 88M    Resets Tue 5:00AM │
 │─────────────────────────────────────│
-│ </> Codex              [Sign in]   │
-│ ✦  Gemini              [Sign in]   │
+│ ⬡  Antigravity                     │
+│   Pro Model       ████░░░░  42%    │
+│   Fast Model      ██░░░░░░  28%    │
 │─────────────────────────────────────│
 │ ◉ Live · Claude · Updated 17:43:12 │
 └─────────────────────────────────────┘
@@ -106,6 +122,7 @@ npm run tauri icon ../icon.png
 - แอปจำตำแหน่งล่าสุดอัตโนมัติ ปิดแล้วเปิดใหม่ยังอยู่ที่เดิม
 
 ### ซ่อน / แสดง
+- **Keyboard shortcut:** `Ctrl+Shift+U` (Windows/Linux) หรือ `Cmd+Shift+U` (macOS)
 - คลิก **tray icon** ที่ system tray (มุมขวาล่าง Windows / menu bar macOS) เพื่อสลับซ่อน-แสดง
 - คลิกขวา tray icon → **Hide** หรือ **Show**
 - คลิกขวา tray icon → **Quit** เพื่อปิดแอป
@@ -117,13 +134,17 @@ npm run tauri icon ../icon.png
 |---|---|
 | **Always on Top** | เปิด = ลอยเหนือทุก window ตลอด (default: เปิด) |
 | **Opacity** | ปรับความโปร่งแสง 30%–100% (default: 95%) |
+| **Refresh Interval** | ระยะเวลา auto-refresh (default: 60 วินาที) |
 
 ### Refresh ข้อมูล
 - กด **↻** เพื่อ refresh ทันที
-- แอป refresh อัตโนมัติทุก 60 วินาที
+- แอป refresh อัตโนมัติตามที่ตั้งไว้ใน Settings
 
 ### Claude — local estimate
-ถ้า Claude ยังไม่ได้ sign in จะแสดงป้าย `local estimate` — คำนวณจากไฟล์ Claude Code ที่อยู่ใน `~/.claude/projects/**/*.jsonl` บนเครื่องโดยตรง ไม่ต้องเชื่อมต่ออินเทอร์เน็ต
+คำนวณจากไฟล์ Claude Code ที่อยู่ใน `~/.claude/projects/**/*.jsonl` โดยตรง ไม่ต้องเชื่อมต่ออินเทอร์เน็ต ไม่ต้อง login
+
+### Antigravity
+ค้นหา Antigravity language server process อัตโนมัติ (`wmic` บน Windows, `ps` บน macOS) แล้วดึง quota ผ่าน local HTTP ไม่ต้อง login
 
 ---
 
@@ -147,8 +168,11 @@ npm run tauri icon ../icon.png
 | **Position memory** | จำตำแหน่งล่าสุดอัตโนมัติ |
 | **Opacity** | ปรับความโปร่งแสงได้ใน Settings |
 | **Always on Top** | toggle ได้ใน Settings |
-| **System tray** | คลิก tray icon เพื่อซ่อน/แสดง |
+| **Keyboard shortcut** | `Ctrl+Shift+U` / `Cmd+Shift+U` สลับซ่อน-แสดง |
+| **System tray** | คลิก tray icon เพื่อซ่อน/แสดง + compact mode |
+| **Compact mode** | คลิก tray → Compact เพื่อย่อ overlay |
 | **Claude local** | อ่านจาก `~/.claude/projects/**/*.jsonl` |
+| **Antigravity** | ค้นหา process อัตโนมัติ ดึง quota แบบ local |
 
 ---
 
@@ -156,17 +180,25 @@ npm run tauri icon ../icon.png
 
 ```
 windows/
-├── src/                    React frontend
-│   ├── components/         Header, ProviderSection, UsageBar, Footer, Settings
-│   ├── store.ts            Zustand state + Tauri invoke calls
-│   ├── types.ts            TypeScript types
-│   └── utils.ts            format helpers
-└── src-tauri/              Rust backend
+├── src/                         React frontend
+│   ├── components/
+│   │   ├── Header.tsx           แถบบน + ปุ่ม refresh/settings
+│   │   ├── ProviderSection.tsx  Claude, Codex, Gemini rows
+│   │   ├── AntigravitySection.tsx Antigravity quota lanes
+│   │   ├── UsageBar.tsx         progress bar component
+│   │   ├── Footer.tsx           status bar ล่างสุด
+│   │   ├── Settings.tsx         settings panel
+│   │   └── CompactView.tsx      compact mode view
+│   ├── store.ts                 Zustand state + Tauri invoke calls
+│   ├── types.ts                 TypeScript types
+│   └── utils.ts                 format helpers
+└── src-tauri/                   Rust backend
     ├── src/
-    │   ├── main.rs         entry point
-    │   ├── lib.rs          Tauri setup + commands
-    │   ├── claude_parser.rs อ่าน .jsonl → คำนวณ session/weekly
-    │   ├── models.rs       data structs
-    │   └── tray.rs         system tray
-    └── tauri.conf.json     window config (frameless, transparent, alwaysOnTop)
+    │   ├── main.rs              entry point
+    │   ├── lib.rs               Tauri setup + commands
+    │   ├── claude_parser.rs     อ่าน .jsonl → คำนวณ session/weekly
+    │   ├── antigravity_parser.rs ค้นหา process + ดึง quota
+    │   ├── models.rs            data structs
+    │   └── tray.rs              system tray + compact toggle
+    └── tauri.conf.json          window config (frameless, transparent, alwaysOnTop)
 ```

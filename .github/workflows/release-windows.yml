@@ -1,0 +1,125 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/src-tauri
+
+      - name: Install npm dependencies
+        working-directory: windows
+        run: npm ci
+
+      - name: Generate app icons
+        working-directory: windows
+        run: npm run tauri icon ../icon.png
+        continue-on-error: true
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: windows
+          tagName: ${{ github.ref_name || github.event.inputs.version }}
+          releaseName: 'AI Usage Counter ${{ github.ref_name || github.event.inputs.version }}'
+          releaseBody: |
+            ## AI Usage Counter — Windows
+
+            ### ติดตั้ง
+            - ดาวน์โหลด **`.msi`** แล้วดับเบิลคลิกเพื่อติดตั้ง (แนะนำ)
+            - หรือดาวน์โหลด **`_x64-setup.exe`** (NSIS installer)
+
+            ### Providers
+            | Provider | สถานะ |
+            |---|---|
+            | Claude | ✅ local — อ่าน `~/.claude/projects/**/*.jsonl` |
+            | Antigravity | ✅ local process discovery |
+            | Codex (ChatGPT) | ✅ sign in ด้วย account |
+            | Gemini | ✅ sign in ด้วย Google account |
+
+            ### ความต้องการของระบบ
+            - Windows 10 (1803+) หรือใหม่กว่า
+            - WebView2 (มักติดตั้งมาพร้อม Microsoft Edge แล้ว)
+          releaseDraft: false
+          prerelease: false
+
+  build-macos:
+    name: Build macOS app (Tauri)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/src-tauri
+
+      - name: Install npm dependencies
+        working-directory: windows
+        run: npm ci
+
+      - name: Generate app icons
+        working-directory: windows
+        run: npm run tauri icon ../icon.png
+        continue-on-error: true
+
+      - name: Build Tauri app (Universal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: windows
+          tagName: ${{ github.ref_name || github.event.inputs.version }}
+          releaseName: 'AI Usage Counter ${{ github.ref_name || github.event.inputs.version }}'
+          args: --target universal-apple-darwin
+          releaseBody: ''
+          releaseDraft: false
+          prerelease: false
