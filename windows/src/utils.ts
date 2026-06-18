@@ -1,3 +1,18 @@
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import type { MouseEvent } from 'react'
+
+// Interactive elements that should click, not drag the window.
+const NO_DRAG_SELECTOR = 'button, input, a, label, select, textarea, .slider, [data-no-drag]'
+
+// Start an OS-level window drag from anywhere on the surface, except when the
+// press lands on an interactive control. Wire to onMouseDown of a root container.
+export function startWindowDrag(e: MouseEvent): void {
+  if (e.button !== 0) return // left button only
+  const target = e.target as HTMLElement
+  if (target.closest(NO_DRAG_SELECTOR)) return
+  getCurrentWindow().startDragging().catch(() => {})
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`

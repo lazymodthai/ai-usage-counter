@@ -7,10 +7,12 @@ import { Footer } from './components/Footer'
 import { Settings } from './components/Settings'
 import { CompactView } from './components/CompactView'
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
+import { startWindowDrag } from './utils'
 import './App.css'
 
 export function App() {
   const opacity = useStore(s => s.opacity)
+  const autoDim = useStore(s => s.autoDim)
   const compact = useStore(s => s.compact)
   const showSettings = useStore(s => s.showSettings)
   const visibleProviders = useStore(s => s.visibleProviders)
@@ -44,7 +46,8 @@ export function App() {
     <>
       <div
         className={`overlay ${usesTwoColumns ? 'two-columns' : ''}`}
-        style={{ '--overlay-opacity': opacity } as React.CSSProperties}
+        style={{ '--idle-opacity': autoDim ? opacity : 1 } as React.CSSProperties}
+        onMouseDown={startWindowDrag}
       >
         <div className="layout-header">
           <Header />

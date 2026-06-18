@@ -15,6 +15,7 @@ interface Store extends AppState {
   sessionTokenLimit: number
   weeklyTokenLimit: number
   refreshInterval: number
+  autoDim: boolean
 
   refreshAll: () => Promise<void>
   loadProviderAuthStates: () => Promise<void>
@@ -22,6 +23,7 @@ interface Store extends AppState {
   signOutProvider: (provider: ProviderID) => Promise<void>
   setMenubarSource: (id: ProviderID) => void
   setOpacity: (v: number) => void
+  setAutoDim: (v: boolean) => void
   setAlwaysOnTop: (v: boolean) => void
   setShowSettings: (v: boolean) => void
   setCompact: (v: boolean) => Promise<void>
@@ -108,7 +110,11 @@ export const useStore = create<Store>((set, get) => ({
   },
   menubarSource: 'claude',
   isLoading: false,
-  opacity: 0.95,
+  opacity: (() => {
+    const v = Number(localStorage.getItem('idleOpacity'))
+    return v > 0 ? v : 0.4
+  })(),
+  autoDim: localStorage.getItem('autoDim') !== 'false',
   alwaysOnTop: true,
   compact: false,
   showSettings: false,
@@ -282,7 +288,15 @@ export const useStore = create<Store>((set, get) => ({
 
   setMenubarSource: id => set({ menubarSource: id }),
 
-  setOpacity: v => set({ opacity: v }),
+  setOpacity: v => {
+    set({ opacity: v })
+    localStorage.setItem('idleOpacity', String(v))
+  },
+
+  setAutoDim: v => {
+    set({ autoDim: v })
+    localStorage.setItem('autoDim', String(v))
+  },
 
   setAlwaysOnTop: async v => {
     set({ alwaysOnTop: v })

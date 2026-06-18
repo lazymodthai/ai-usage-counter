@@ -10,12 +10,12 @@ export function Header() {
   const hideWindow = useStore(s => s.hideWindow)
 
   return (
-    <div className="header" data-tauri-drag-region>
-      <span className={`provider-icon tint-${menubarSource}`} data-tauri-drag-region>
+    <div className="header">
+      <span className={`provider-icon tint-${menubarSource}`}>
         {PROVIDER_ICONS[menubarSource]}
       </span>
-      <span className="header-title" data-tauri-drag-region>AI Usage</span>
-      <div className="spacer" data-tauri-drag-region />
+      <span className="header-title">AI Usage</span>
+      <div className="spacer" />
       {isLoading && <span className="spinner" />}
       <button className="icon-btn" onClick={refreshAll} title="Refresh">↻</button>
       <button

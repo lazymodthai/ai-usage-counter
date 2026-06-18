@@ -6,8 +6,10 @@ const SHORTCUT_LABEL = IS_MAC ? '⌘⇧U' : 'Ctrl+Shift+U'
 
 export function Settings() {
   const opacity = useStore(s => s.opacity)
+  const autoDim = useStore(s => s.autoDim)
   const alwaysOnTop = useStore(s => s.alwaysOnTop)
   const setOpacity = useStore(s => s.setOpacity)
+  const setAutoDim = useStore(s => s.setAutoDim)
   const setAlwaysOnTop = useStore(s => s.setAlwaysOnTop)
   const setShowSettings = useStore(s => s.setShowSettings)
   const visibleProviders = useStore(s => s.visibleProviders)
@@ -119,14 +121,30 @@ export function Settings() {
 
           <div className="divider" />
 
-          {/* Opacity */}
-          <div className="setting-col">
+          {/* Auto-dim */}
+          <div className="setting-row">
+            <div>
+              <div className="setting-label">Auto-dim</div>
+              <div className="setting-sub">จางลงเมื่อไม่ใช้ · ชัดเต็มเมื่อ hover</div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={autoDim}
+                onChange={e => setAutoDim(e.target.checked)}
+              />
+              <span className="toggle-track" />
+            </label>
+          </div>
+
+          {/* Idle opacity — only relevant while auto-dim is on */}
+          <div className="setting-col" style={{ opacity: autoDim ? 1 : 0.4, pointerEvents: autoDim ? 'auto' : 'none' }}>
             <div className="setting-label">
-              Opacity — {Math.round(opacity * 100)}%
+              ความจางตอนไม่ใช้ — {Math.round(opacity * 100)}%
             </div>
             <input
               type="range"
-              min={0.3}
+              min={0.15}
               max={1}
               step={0.05}
               value={opacity}
