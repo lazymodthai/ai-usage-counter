@@ -51,22 +51,7 @@ export const PROVIDER_ICONS: Record<ProviderID, string> = {
   antigravity: '⬡',
 }
 
-// Rust response shape from get_claude_local_usage
-export interface ClaudeLocalUsage {
-  session_tokens: number
-  session_limit: number
-  session_fraction: number
-  session_reset_secs: number
-  session_active: boolean
-  weekly_tokens: number
-  weekly_limit: number
-  weekly_fraction: number
-  weekly_reset_secs: number
-  is_local: boolean
-  fetched_at: string
-}
-
-// Rust response shape from get_codex_usage / get_gemini_usage
+// Rust response shape from get_claude_usage / get_codex_usage / get_gemini_usage
 export interface ProviderUsageResult {
   session_pct: number | null
   session_reset_secs: number | null

@@ -2,9 +2,9 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow, PhysicalPosition, LogicalSize, currentMonitor } from '@tauri-apps/api/window'
-import type { ProviderID, ProviderState, AppState, ClaudeLocalUsage, AntigravityUsage, ProviderUsageResult } from './types'
+import type { ProviderID, ProviderState, AppState, AntigravityUsage, ProviderUsageResult } from './types'
 import { ALL_PROVIDERS } from './types'
-import { formatTokens, formatCountdown, formatResetLabel } from './utils'
+import { formatCountdown, formatResetLabel } from './utils'
 
 const FULL_HEIGHT = 500
 const COMPACT_HEIGHT = 44
@@ -45,31 +45,6 @@ const defaultProvider = (): ProviderState => ({
   fetchedAt: null,
   usingLocal: false,
 })
-
-function mapClaudeUsage(u: ClaudeLocalUsage): ProviderState {
-  return {
-    authState: 'signed_in',
-    usingLocal: u.is_local,
-    fetchedAt: new Date(u.fetched_at),
-    quotaLanes: [],
-    sessionBar: {
-      fraction: u.session_fraction,
-      usedText: formatTokens(u.session_tokens),
-      limitText: formatTokens(u.session_limit),
-      resetLabel: u.session_active && u.session_reset_secs > 0
-        ? formatCountdown(u.session_reset_secs)
-        : '',
-      isActive: u.session_active,
-    },
-    weeklyBar: {
-      fraction: u.weekly_fraction,
-      usedText: formatTokens(u.weekly_tokens),
-      limitText: formatTokens(u.weekly_limit),
-      resetLabel: formatResetLabel(u.weekly_reset_secs),
-      isActive: true,
-    },
-  }
-}
 
 function mapProviderUsage(u: ProviderUsageResult): ProviderState {
   const pctToFraction = (pct: number | null) => pct != null ? pct / 100 : 0
@@ -131,7 +106,7 @@ export const useStore = create<Store>((set, get) => ({
   refreshInterval: Number(localStorage.getItem('refreshInterval')) || 60,
 
   loadProviderAuthStates: async () => {
-    for (const provider of ['codex', 'gemini'] as ProviderID[]) {
+    for (const provider of ['claude', 'codex', 'gemini'] as ProviderID[]) {
       try {
         const authState = await invoke<string>('get_provider_auth_state', { provider })
         set(state => ({
@@ -165,13 +140,18 @@ export const useStore = create<Store>((set, get) => ({
 
   refreshAll: async () => {
     set({ isLoading: true })
-    try {
-      const usage = await invoke<ClaudeLocalUsage>('get_claude_local_usage')
-      set(state => ({
-        providers: { ...state.providers, claude: mapClaudeUsage(usage) },
-      }))
-    } catch (e) {
-      console.error('Claude local usage error:', e)
+
+    // Claude: official claude.ai API only (requires login) — never a local estimate.
+    const claudeAuth = get().providers.claude.authState
+    if (claudeAuth === 'signed_in' || claudeAuth === 'expired') {
+      try {
+        const result = await invoke<ProviderUsageResult | null>('get_claude_usage')
+        if (result) {
+          set(state => ({ providers: { ...state.providers, claude: mapProviderUsage(result) } }))
+        }
+      } catch (e) {
+        console.error('Claude usage error:', e)
+      }
     }
 
     // Fetch Codex usage if signed in

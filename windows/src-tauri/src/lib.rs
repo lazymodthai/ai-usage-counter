@@ -1,27 +1,23 @@
 mod antigravity_parser;
-mod claude_parser;
+mod claude_provider;
 mod codex_provider;
 mod gemini_provider;
 mod models;
 mod provider_worker;
 mod tray;
 
-use models::{AntigravityUsageRaw, ClaudeLocalUsage, ProviderUsageResult};
+use models::{AntigravityUsageRaw, ProviderUsageResult};
 use provider_worker::{clear_provider_data, load_auth_state, save_auth_state, ProviderWorker};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
+    pub claude: Arc<ProviderWorker>,
     pub codex: Arc<ProviderWorker>,
     pub gemini: Arc<ProviderWorker>,
 }
 
 // ── Existing commands ─────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn get_claude_local_usage() -> ClaudeLocalUsage {
-    claude_parser::compute()
-}
 
 #[tauri::command]
 fn get_antigravity_usage() -> Option<AntigravityUsageRaw> {
@@ -74,6 +70,7 @@ async fn open_login_window(app: AppHandle, provider: String) -> Result<(), Strin
     }
 
     let start_url = match provider.as_str() {
+        "claude" => "https://claude.ai/login",
         "codex" => "https://chatgpt.com/auth/login",
         "gemini" => "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp",
         _ => return Err(format!("Unknown provider: {provider}")),
@@ -96,6 +93,7 @@ async fn open_login_window(app: AppHandle, provider: String) -> Result<(), Strin
 
     WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed_url))
         .title(match provider.as_str() {
+            "claude" => "Sign in to Claude",
             "codex"  => "Sign in to ChatGPT",
             "gemini" => "Sign in to Gemini",
             _        => "Sign in",
@@ -105,6 +103,13 @@ async fn open_login_window(app: AppHandle, provider: String) -> Result<(), Strin
         .data_directory(data_dir)
         .on_navigation(move |url| {
             let is_done = match provider_for_nav.as_str() {
+                "claude" => {
+                    let host = url.host_str().unwrap_or("");
+                    let path = url.path();
+                    host.contains("claude.ai")
+                        && !path.contains("/login")
+                        && !path.contains("/auth")
+                }
                 "codex" => {
                     let host = url.host_str().unwrap_or("");
                     let path = url.path();
@@ -153,6 +158,7 @@ async fn sign_out_provider(
     }
     // Reset worker ready state
     match provider.as_str() {
+        "claude" => state.claude.is_ready.store(false, std::sync::atomic::Ordering::Relaxed),
         "codex" => state.codex.is_ready.store(false, std::sync::atomic::Ordering::Relaxed),
         "gemini" => state.gemini.is_ready.store(false, std::sync::atomic::Ordering::Relaxed),
         _ => {}
@@ -160,6 +166,47 @@ async fn sign_out_provider(
     // Clear cookies + auth state
     clear_provider_data(&app, &provider);
     Ok(())
+}
+
+// ── Claude usage (official claude.ai API, requires login) ──────────────────────
+
+#[tauri::command]
+async fn get_claude_usage(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<ProviderUsageResult>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("providers")
+        .join("claude");
+
+    let (window, is_new) = state
+        .claude
+        .ensure_window(&app, "claude-worker", claude_provider::START_URL, data_dir)
+        .map_err(|e| e.to_string())?;
+
+    let raw = state
+        .claude
+        .eval_and_wait(&window, claude_provider::FETCH_JS, 20, is_new)
+        .await;
+
+    if let Some(raw) = raw {
+        if raw == "__auth_expired__" {
+            save_auth_state(&app, "claude", "expired");
+            return Ok(Some(ProviderUsageResult {
+                is_auth_expired: true,
+                fetched_at: chrono::Utc::now().to_rfc3339(),
+                ..Default::default()
+            }));
+        }
+        if let Some(result) = claude_provider::parse_usage(&raw) {
+            return Ok(Some(result));
+        }
+    }
+
+    Ok(None)
 }
 
 // ── Codex usage ───────────────────────────────────────────────────────────────
@@ -313,6 +360,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(AppState {
+            claude: ProviderWorker::new(),
             codex: ProviderWorker::new(),
             gemini: ProviderWorker::new(),
         })
@@ -364,7 +412,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_claude_local_usage,
             get_antigravity_usage,
             update_tray_title,
             save_window_position,
@@ -372,6 +419,7 @@ pub fn run() {
             get_provider_auth_state,
             open_login_window,
             sign_out_provider,
+            get_claude_usage,
             get_codex_usage,
             get_gemini_usage,
             show_first_launch_tip,

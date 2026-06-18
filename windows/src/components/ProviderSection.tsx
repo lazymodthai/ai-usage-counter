@@ -17,9 +17,9 @@ export function ProviderSection({ providerID }: Props) {
   const provider = useStore(s => s.providers[providerID])
   const openLoginWindow = useStore(s => s.openLoginWindow)
   const signOutProvider = useStore(s => s.signOutProvider)
-  const { authState, sessionBar, weeklyBar, quotaLanes, usingLocal } = provider
+  const { authState, sessionBar, weeklyBar, quotaLanes } = provider
   const isConnected = authState === 'signed_in'
-  const hasBars = isConnected || providerID === 'claude'
+  const hasBars = isConnected
   const tint = TINT[providerID]
 
   return (
@@ -34,16 +34,13 @@ export function ProviderSection({ providerID }: Props) {
         {providerID === 'gemini' && isConnected && (
           <span className="badge">beta</span>
         )}
-        {providerID === 'claude' && usingLocal && (
-          <span className="badge">local estimate</span>
-        )}
         {authState === 'expired' && (
           <span className="badge badge-yellow">session expired</span>
         )}
 
         <div className="spacer" />
 
-        {isConnected && providerID !== 'claude' && providerID !== 'antigravity' && (
+        {isConnected && providerID !== 'antigravity' && (
           <button
             className="sign-out-btn"
             style={{ color: tint, opacity: 0.5, fontSize: 9 }}
@@ -52,7 +49,7 @@ export function ProviderSection({ providerID }: Props) {
             Sign out
           </button>
         )}
-        {!isConnected && providerID !== 'claude' && providerID !== 'antigravity' && (
+        {!isConnected && providerID !== 'antigravity' && (
           <button
             className="sign-in-btn"
             style={{ color: tint }}

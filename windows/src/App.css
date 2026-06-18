@@ -379,6 +379,29 @@ body {
   cursor: pointer;
 }
 
+/* Collapsible section */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.section-head .setting-label { cursor: pointer; }
+.section-chevron {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  transition: transform 0.2s ease;
+  width: 10px;
+  display: inline-block;
+}
+.section-chevron.open { transform: rotate(90deg); }
+.section-body {
+  margin-top: 8px;
+  overflow: hidden;
+}
+
 /* Keyboard shortcut badge */
 kbd.kbd {
   font-family: 'Cascadia Code', 'SF Mono', 'Consolas', monospace;
