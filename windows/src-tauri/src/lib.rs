@@ -141,6 +141,27 @@ async fn open_login_window(app: AppHandle, provider: String) -> Result<(), Strin
         .build()
         .map_err(|e| e.to_string())?;
 
+    // Fallback: if the user closes the login window manually (URL detection may
+    // miss SPA redirects), treat the close as "maybe signed in" and re-check.
+    // The usage fetch shares the same cookie store, so it confirms or downgrades.
+    let app_for_close = app.clone();
+    let provider_for_close = provider.clone();
+    let logged_in_for_close = logged_in.clone();
+    let login_window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| "login window missing".to_string())?;
+    login_window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            if !logged_in_for_close.load(Ordering::SeqCst) {
+                // Don't trust the close alone — let the usage fetch confirm login
+                // (it persists signed_in on success, expired on failure).
+                app_for_close
+                    .emit("auth-state-changed", &provider_for_close)
+                    .ok();
+            }
+        }
+    });
+
     Ok(())
 }
 
@@ -202,6 +223,7 @@ async fn get_claude_usage(
             }));
         }
         if let Some(result) = claude_provider::parse_usage(&raw) {
+            save_auth_state(&app, "claude", "signed_in");
             return Ok(Some(result));
         }
     }
@@ -244,6 +266,7 @@ async fn get_codex_usage(
             }));
         }
         if let Some(result) = codex_provider::parse_wham(&raw) {
+            save_auth_state(&app, "codex", "signed_in");
             return Ok(Some(result));
         }
     }
@@ -269,6 +292,7 @@ async fn get_codex_usage(
             }));
         }
         if let Some(result) = codex_provider::parse_scrape(&raw) {
+            save_auth_state(&app, "codex", "signed_in");
             return Ok(Some(result));
         }
     }
@@ -324,6 +348,7 @@ async fn get_gemini_usage(
                 }));
             }
             if let Some(result) = gemini_provider::parse_usage(&raw) {
+                save_auth_state(&app, "gemini", "signed_in");
                 return Ok(Some(result));
             }
         }

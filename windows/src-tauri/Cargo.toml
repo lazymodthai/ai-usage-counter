@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-counter"
-version = "1.3.3"
+version = "1.3.4"
 description = "AI Usage Counter — Windows overlay"
 authors = []
 edition = "2021"
