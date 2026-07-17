@@ -433,7 +433,7 @@ struct UsageBarRow: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.75))
                 Spacer()
-                if vm.isActive && vm.fraction > 0 {
+                if vm.isActive {
                     Text(String(format: "%.2f%%", pct))
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(barColor)

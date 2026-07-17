@@ -128,17 +128,23 @@ final class AntigravityProvider: UsageProvider {
 
         do {
             try process.run()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
-                if process.isRunning {
-                    process.terminate()
-                }
-            }
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
         } catch {
             return ""
         }
+
+        let watchdog = DispatchWorkItem {
+            if process.isRunning {
+                process.terminate()
+            }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5, execute: watchdog)
+
+        // Drain the pipe before waiting: `ps ax` output far exceeds the 64KB
+        // pipe buffer, and a writer blocked on a full pipe never exits.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        watchdog.cancel()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     nonisolated private static func firstMatch(in text: String, pattern: String) -> String? {
