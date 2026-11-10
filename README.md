@@ -22,6 +22,12 @@ The app shows current session usage, weekly usage, reset times, and provider-spe
 
 ![AI Usage Counter settings](docs/assets/settings.png)
 
+### Claude Usage History
+
+Click the clock button (🕘) in the popup header to open the history window. Each week shows its peak Weekly and Fable usage and the number of 5-hour sessions; expand a week to see every session with its peak usage.
+
+![Claude Usage History window](docs/assets/history.png)
+
 ## Supported Providers
 
 | Provider | What It Shows | Notes |
