@@ -4,7 +4,7 @@ set -euo pipefail
 APP_NAME="Claude Usage Counter"
 BINARY_NAME="ClaudeUsageCounter"
 BUNDLE_ID="com.lazymodthai.claude-usage-counter"
-VERSION="1.4.0"
+VERSION="1.5.0"
 BUILD_DIR="build"
 APP_PATH="${BUILD_DIR}/${APP_NAME}.app"
 ICON_SRC="icon.png"
@@ -20,8 +20,10 @@ mkdir -p "${APP_PATH}/Contents/MacOS"
 mkdir -p "${APP_PATH}/Contents/Resources"
 
 # Copy binary
-cp ".build/apple/Products/Release/${BINARY_NAME}" "${APP_PATH}/Contents/MacOS/${APP_NAME}" 2>/dev/null || \
-cp ".build/release/${BINARY_NAME}" "${APP_PATH}/Contents/MacOS/${APP_NAME}"
+# Ask SwiftPM where it put the universal binary — the output dir has moved between
+# toolchains (.build/apple/… → .build/out/…), and a hardcoded path silently picks up stale builds.
+BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+cp "${BIN_DIR}/${BINARY_NAME}" "${APP_PATH}/Contents/MacOS/${APP_NAME}"
 chmod +x "${APP_PATH}/Contents/MacOS/${APP_NAME}"
 
 # Build .icns from icon.png

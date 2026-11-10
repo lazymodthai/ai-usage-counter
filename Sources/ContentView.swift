@@ -192,6 +192,13 @@ struct HeaderRow: View {
                     .foregroundStyle(Color.white.opacity(0.5))
             }
             .buttonStyle(.plain)
+            Button(action: { HistoryWindow.show(history: store.history) }) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .help("Claude usage history")
             Button(action: { store.showSettings.toggle() }) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 11))
@@ -237,6 +244,15 @@ struct ProviderSection: View {
                 Text(providerID.displayName)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
+                if isConnected, let plan = store.usages[providerID]?.planName, !plan.isEmpty {
+                    Text(plan.uppercased())
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color.tint(for: providerID))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.tint(for: providerID).opacity(0.15))
+                        .cornerRadius(3)
+                        .lineLimit(1)
+                }
                 if (providerID == .gemini || providerID == .antigravity) && isConnected {
                     Text("beta")
                         .font(.system(size: 8, weight: .semibold))
@@ -292,8 +308,8 @@ struct ProviderSection: View {
                 ForEach(quotaBars, id: \.lane.id) { item in
                     UsageBarRow(
                         label: item.lane.label,
-                        icon: "gauge.with.dots.needle.bottom.50percent",
-                        iconColor: Color.tint(for: providerID),
+                        icon: quotaIcon(for: item.lane),
+                        iconColor: quotaIconColor(for: item.lane, providerID: providerID),
                         vm: item.vm)
                 }
                 if providerID != .claude
@@ -310,6 +326,24 @@ struct ProviderSection: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
+}
+
+/// Icon for a provider quota lane (Claude model-scoped weekly bars, Antigravity groups, etc.).
+private func quotaIcon(for lane: ProviderQuotaLane) -> String {
+    let key = (lane.label + " " + (lane.group ?? "")).lowercased()
+    if key.contains("fable") { return "book.fill" }
+    if key.contains("sonnet") { return "waveform" }
+    if key.contains("opus") { return "brain.head.profile" }
+    if lane.group == "weekly_scoped" { return "calendar.badge.clock" }
+    return "gauge.with.dots.needle.bottom.50percent"
+}
+
+private func quotaIconColor(for lane: ProviderQuotaLane, providerID: ProviderID) -> Color {
+    let key = lane.label.lowercased()
+    if key.contains("fable") { return Color(red: 0.72, green: 0.45, blue: 1.0) }
+    if key.contains("sonnet") { return .sonnetCyan }
+    if key.contains("opus") { return .opusBlue }
+    return Color.tint(for: providerID)
 }
 
 struct ProviderFetchStatusRow: View {

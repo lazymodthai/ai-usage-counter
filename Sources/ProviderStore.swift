@@ -37,6 +37,7 @@ final class ProviderStore: ObservableObject {
 
     // MARK: - Internals
     let providers: [ProviderID: any UsageProvider]
+    let history = UsageHistoryStore()
     weak var statusItem: NSStatusItem?
 
     private var nextFetchAt: [ProviderID: Date] = [:]
@@ -44,6 +45,8 @@ final class ProviderStore: ObservableObject {
     private var lastStatusTitle = ""
     private var watcher: FileWatcher?
     private var sleepObservers: [NSObjectProtocol] = []
+    private var localParseRunning = false
+    private var localParsePending = false
 
     private static let cachedUsagesKey = "cachedProviderUsages"
     private static let visibleProvidersKey = "visibleProviders"
@@ -107,10 +110,10 @@ final class ProviderStore: ObservableObject {
         watcher = FileWatcher(path: claudeDir) { [weak self] in
             Task { @MainActor in self?.refreshLocal() }
         }
-        refreshLocal()
-
         Task { @MainActor in
             await refreshAuthStates()
+            // Only parses when Claude isn't signed in (live API data replaces it).
+            refreshLocal()
             scheduleInitialFetches()
         }
 
@@ -230,15 +233,18 @@ final class ProviderStore: ObservableObject {
             switch result {
             case .success(let usage):
                 self.usages[id] = usage
+                if id == .claude { self.history.record(usage) }
                 self.fetchFailures[id] = 0
                 self.persistUsages()
                 self.scheduleNext(id)
             case .authExpired:
                 self.authStates[id] = .expired
                 self.ensureValidMenubarSource()
+                if id == .claude { self.refreshLocal() }
                 // Stop polling — resumes after the user re-authenticates
             case .failure:
                 self.fetchFailures[id, default: 0] += 1
+                if id == .claude { self.refreshLocal() }  // no-op if cached live data exists
                 self.scheduleNext(id)
             }
             self.releaseIdleResources(after: id)
@@ -318,6 +324,7 @@ final class ProviderStore: ObservableObject {
             fetchFailures[id] = nil
             persistUsages()
             ensureValidMenubarSource()
+            if id == .claude { refreshLocal() }
             updateStatusBar(force: true)
         }
     }
@@ -334,10 +341,24 @@ final class ProviderStore: ObservableObject {
 
     // MARK: - Claude local fallback
 
-    func refreshLocal() {
+    /// Re-parse Claude Code's local JSONL logs. Only needed while the Claude rows
+    /// show the local estimate; coalesced so at most one parse runs at a time and
+    /// bursts of file writes during an active session collapse into one re-parse.
+    func refreshLocal(force: Bool = false) {
+        guard force || claudeUsingLocal else { return }
+        if localParseRunning { localParsePending = true; return }
+        localParseRunning = true
         Task { @MainActor in
-            self.data = await UsageParser.parse()
-            self.updateStatusBar(force: true)
+            defer { self.localParseRunning = false }
+            repeat {
+                self.localParsePending = false
+                self.data = await UsageParser.parse()
+                self.updateStatusBar(force: true)
+                // Throttle: an active Claude Code session writes JSONL every few seconds.
+                if self.localParsePending {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                }
+            } while self.localParsePending && self.claudeUsingLocal
         }
     }
 
@@ -542,7 +563,12 @@ extension ProviderStore {
         return (usage.quotaLanes ?? []).map { lane in
             let reset: String
             if let resetAt = lane.resetAt, resetAt > Date() {
-                reset = "Resets in \(formatDuration(resetAt.timeIntervalSinceNow))"
+                // Weekly model-scoped caps (e.g. Fable) match the weekly bar clock style.
+                if lane.group == "weekly_scoped" {
+                    reset = "Resets \(formatResetClock(resetAt))"
+                } else {
+                    reset = "Resets in \(formatDuration(resetAt.timeIntervalSinceNow))"
+                }
             } else if let resetText = lane.resetText, !resetText.isEmpty {
                 reset = resetText
             } else {

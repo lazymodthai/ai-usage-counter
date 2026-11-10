@@ -32,14 +32,17 @@ enum UsageParser {
             options: [.skipsHiddenFiles]
         ) else { return data }
 
+        var seenPaths = Set<String>()
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
             let name = url.deletingPathExtension().lastPathComponent
             if !name.hasPrefix("agent-") {
                 sessionIDs.insert(url.deletingLastPathComponent().lastPathComponent + "/" + name)
             }
-            collectRecords(from: url, into: &records)
+            seenPaths.insert(url.path)
+            records.append(contentsOf: cachedRecords(for: url))
         }
+        pruneCache(keeping: seenPaths)
 
         data.totalSessions = sessionIDs.count
         guard !records.isEmpty else { return data }
@@ -226,17 +229,54 @@ enum UsageParser {
 
     // MARK: - File Parsing
 
+    // Per-file record cache keyed by (mtime, size). Only files that changed since the
+    // last parse are re-read, so an active Claude Code session costs one file, not GBs.
+    private struct CacheEntry { let mtime: Date; let size: Int; let records: [RawRecord] }
+    private static var fileCache: [String: CacheEntry] = [:]
+    private static let cacheLock = NSLock()
+
+    private static func cachedRecords(for url: URL) -> [RawRecord] {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let mtime = attrs?[.modificationDate] as? Date ?? .distantPast
+        let size = (attrs?[.size] as? NSNumber)?.intValue ?? -1
+
+        cacheLock.lock()
+        let hit = fileCache[url.path]
+        cacheLock.unlock()
+        if let hit, hit.mtime == mtime, hit.size == size { return hit.records }
+
+        var records: [RawRecord] = []
+        collectRecords(from: url, into: &records)
+        cacheLock.lock()
+        fileCache[url.path] = CacheEntry(mtime: mtime, size: size, records: records)
+        cacheLock.unlock()
+        return records
+    }
+
+    private static func pruneCache(keeping paths: Set<String>) {
+        cacheLock.lock()
+        fileCache = fileCache.filter { paths.contains($0.key) }
+        cacheLock.unlock()
+    }
+
     private static func collectRecords(from url: URL, into records: inout [RawRecord]) {
-        guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else { return }
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            if let r = parseRecord(String(line)) { records.append(r) }
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return }
+        // Walk raw bytes and skip non-assistant lines before paying for JSON parsing.
+        let marker = Data("\"assistant\"".utf8)
+        let newline = UInt8(ascii: "\n")
+        var start = data.startIndex
+        while start < data.endIndex {
+            let end = data[start...].firstIndex(of: newline) ?? data.endIndex
+            if end > start, data.range(of: marker, in: start..<end) != nil,
+               let r = parseRecord(data.subdata(in: start..<end)) {
+                records.append(r)
+            }
+            start = end == data.endIndex ? end : data.index(after: end)
         }
     }
 
-    private static func parseRecord(_ line: String) -> RawRecord? {
-        guard let raw = line.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+    private static func parseRecord(_ raw: Data) -> RawRecord? {
+        guard let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               (obj["type"] as? String) == "assistant",
               let tsStr = obj["timestamp"] as? String,
               let msg = obj["message"] as? [String: Any],
@@ -270,12 +310,20 @@ enum UsageParser {
         return content.filter { ($0["type"] as? String) == "tool_use" }.count
     }
 
+    // Formatters are expensive to create; reuse them (date(from:) is thread-safe).
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private static func parseDate(_ s: String) -> Date? {
         let iso = s.hasSuffix("Z") ? String(s.dropLast()) + "+00:00" : s
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = fmt.date(from: iso) { return d }
-        fmt.formatOptions = [.withInternetDateTime]
-        return fmt.date(from: iso)
+        return isoFrac.date(from: iso) ?? isoPlain.date(from: iso)
     }
 }

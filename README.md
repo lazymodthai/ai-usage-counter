@@ -10,6 +10,9 @@ The app shows current session usage, weekly usage, reset times, and provider-spe
 
 - **One menu bar monitor** for Claude, Codex, Gemini, and Antigravity.
 - **Session and weekly usage** for Claude, Codex, and Gemini, including reset countdowns.
+- **Claude model-scoped weekly bars** (e.g. Fable) when Anthropic reports them in the usage API.
+- **Claude plan badge** (Pro / Max 5x / Max 20x) read from your claude.ai organization.
+- **Claude usage history** window: peak weekly % (and Fable %) per week, number of 5-hour sessions, and peak % of each session. Recorded locally while the app runs (`~/Library/Application Support/ClaudeUsageCounter/claude-history.json`).
 - **Antigravity model quota tracking** for Gemini, Claude, and GPT quota groups.
 - **Selectable visible agents** so the popup only shows the providers you care about.
 - **Selectable menu bar source** from any connected provider.
@@ -23,7 +26,7 @@ The app shows current session usage, weekly usage, reset times, and provider-spe
 
 | Provider | What It Shows | Notes |
 | --- | --- | --- |
-| Claude | Current session, weekly usage, reset times | Uses claude.ai usage data when connected. Falls back to a local estimate if not signed in. |
+| Claude | Current session, weekly usage, model-scoped weekly bars (e.g. Fable), reset times | Uses claude.ai usage data when connected. Falls back to a local estimate if not signed in. |
 | Codex | Current session, weekly usage, reset times | Uses the signed-in ChatGPT/Codex usage page data. |
 | Gemini | Current session and weekly usage | Beta support. Reads the Gemini usage limits page because Google does not provide a public API for this data. |
 | Antigravity | Per-model quota groups and reset times | Reads quotas from the local Antigravity language server after sign-in. |
